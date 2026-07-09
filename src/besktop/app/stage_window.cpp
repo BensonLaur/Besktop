@@ -1,5 +1,9 @@
 #include "besktop/app/stage_window.h"
 
+#include "besktop/desktop/desktop_snapshot.h"
+#include "besktop/logging/logger.h"
+#include "besktop/render/wallpaper_renderer.h"
+
 #include <string>
 
 namespace {
@@ -93,6 +97,34 @@ std::wstring FormatMonitorSize(const RECT& bounds)
 
 namespace besktop {
 
+class StageWindow {
+public:
+    explicit StageWindow(HINSTANCE instance);
+
+    StageWindow(const StageWindow&) = delete;
+    StageWindow& operator=(const StageWindow&) = delete;
+
+    int Run(int showCommand);
+
+private:
+    bool Create(int showCommand);
+    void Close();
+    void Paint();
+    void RegisterForceExitHotkey();
+    void UnregisterForceExitHotkey();
+    void LogSnapshot() const;
+
+    LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
+
+    HINSTANCE instance_ = nullptr;
+    HWND hwnd_ = nullptr;
+    DesktopSnapshot snapshot_;
+    WallpaperRenderer wallpaperRenderer_;
+    bool forceExitHotkeyRegistered_ = false;
+    bool wallpaperDrawLogged_ = false;
+};
+
 StageWindow::StageWindow(HINSTANCE instance)
     : instance_(instance)
 {
@@ -100,8 +132,12 @@ StageWindow::StageWindow(HINSTANCE instance)
 
 int RunStageWindow(HINSTANCE instance, int showCommand)
 {
+    LogInfo(L"app start");
+    LogInfo(L"log file: " + GetLogFilePath());
     StageWindow stageWindow(instance);
-    return stageWindow.Run(showCommand);
+    const int exitCode = stageWindow.Run(showCommand);
+    LogInfo(L"app exit code: " + std::to_wstring(exitCode));
+    return exitCode;
 }
 
 int StageWindow::Run(int showCommand)
@@ -130,6 +166,7 @@ int StageWindow::Run(int showCommand)
 bool StageWindow::Create(int showCommand)
 {
     snapshot_ = CaptureDesktopSnapshot();
+    LogSnapshot();
 
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
@@ -143,6 +180,7 @@ bool StageWindow::Create(int showCommand)
     windowClass.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
 
     if (RegisterClassExW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        LogError(L"RegisterClassExW failed: " + std::to_wstring(GetLastError()));
         return false;
     }
 
@@ -150,6 +188,7 @@ bool StageWindow::Create(int showCommand)
     const int width = bounds.right - bounds.left;
     const int height = bounds.bottom - bounds.top;
     if (width <= 0 || height <= 0) {
+        LogError(L"invalid monitor bounds: " + FormatMonitorSize(bounds));
         return false;
     }
 
@@ -168,6 +207,7 @@ bool StageWindow::Create(int showCommand)
         this);
 
     if (hwnd_ == nullptr) {
+        LogError(L"CreateWindowExW failed: " + std::to_wstring(GetLastError()));
         return false;
     }
 
@@ -177,11 +217,13 @@ bool StageWindow::Create(int showCommand)
     SetWindowPos(hwnd_, HWND_TOPMOST, bounds.left, bounds.top, width, height, SWP_SHOWWINDOW);
     SetFocus(hwnd_);
     UpdateWindow(hwnd_);
+    LogInfo(L"stage window created: " + FormatMonitorSize(bounds));
     return true;
 }
 
 void StageWindow::Close()
 {
+    LogInfo(L"Close called");
     if (hwnd_ != nullptr) {
         DestroyWindow(hwnd_);
     }
@@ -198,7 +240,15 @@ void StageWindow::Paint()
     HBRUSH backgroundBrush = CreateSolidBrush(RGB(10, 12, 16));
     FillRect(hdc, &clientRect, backgroundBrush);
     DeleteObject(backgroundBrush);
-    wallpaperRenderer_.Draw(hdc, clientRect, snapshot_.wallpaper);
+    const bool wallpaperDrawn = wallpaperRenderer_.Draw(hdc, clientRect, snapshot_.wallpaper);
+    if (!wallpaperDrawLogged_) {
+        wallpaperDrawLogged_ = true;
+        if (wallpaperDrawn) {
+            LogInfo(L"wallpaper draw succeeded");
+        } else {
+            LogWarning(L"wallpaper draw failed; using fallback background");
+        }
+    }
 
     SetBkMode(hdc, TRANSPARENT);
 
@@ -267,6 +317,11 @@ void StageWindow::RegisterForceExitHotkey()
 {
     forceExitHotkeyRegistered_ =
         RegisterHotKey(hwnd_, kForceExitHotkeyId, MOD_CONTROL | MOD_SHIFT, 'B') != FALSE;
+    if (forceExitHotkeyRegistered_) {
+        LogInfo(L"force exit hotkey registered: Ctrl+Shift+B");
+    } else {
+        LogWarning(L"force exit hotkey registration failed: " + std::to_wstring(GetLastError()));
+    }
 }
 
 void StageWindow::UnregisterForceExitHotkey()
@@ -274,6 +329,21 @@ void StageWindow::UnregisterForceExitHotkey()
     if (forceExitHotkeyRegistered_) {
         UnregisterHotKey(hwnd_, kForceExitHotkeyId);
         forceExitHotkeyRegistered_ = false;
+        LogInfo(L"force exit hotkey unregistered");
+    }
+}
+
+void StageWindow::LogSnapshot() const
+{
+    LogInfo(L"snapshot captured");
+    LogInfo(L"monitor: " + FormatMonitorSize(snapshot_.monitorBounds));
+    LogInfo(
+        L"wallpaper path: " +
+        (snapshot_.wallpaper.path.empty() ? std::wstring(L"<fallback>") : snapshot_.wallpaper.path));
+    LogInfo(L"wallpaper layout: " + ToDisplayString(snapshot_.wallpaper.layout));
+    LogInfo(L"demo icons: " + std::to_wstring(snapshot_.icons.size()));
+    for (const std::wstring& warning : snapshot_.warnings) {
+        LogWarning(L"snapshot warning: " + warning);
     }
 }
 
@@ -283,12 +353,14 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE ||
             (wParam == 'B' && IsKeyPressed(VK_CONTROL) && IsKeyPressed(VK_SHIFT))) {
+            LogInfo(L"WM_KEYDOWN exit key: " + std::to_wstring(static_cast<unsigned int>(wParam)));
             Close();
             return 0;
         }
         break;
     case WM_HOTKEY:
         if (wParam == kForceExitHotkeyId) {
+            LogInfo(L"WM_HOTKEY force exit");
             Close();
             return 0;
         }
@@ -303,6 +375,7 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     case WM_DESTROY:
         UnregisterForceExitHotkey();
+        LogInfo(L"WM_DESTROY; posting quit message");
         PostQuitMessage(0);
         return 0;
     case WM_NCDESTROY: {

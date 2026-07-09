@@ -1,5 +1,7 @@
 #include "besktop/render/wallpaper_renderer.h"
 
+#include "besktop/logging/logger.h"
+
 #include <objidl.h>
 #include <gdiplus.h>
 
@@ -84,6 +86,11 @@ WallpaperRenderer::WallpaperRenderer()
 {
     Gdiplus::GdiplusStartupInput startupInput;
     gdiplusReady_ = Gdiplus::GdiplusStartup(&gdiplusToken_, &startupInput, nullptr) == Gdiplus::Ok;
+    if (gdiplusReady_) {
+        LogInfo(L"GDI+ startup succeeded");
+    } else {
+        LogWarning(L"GDI+ startup failed");
+    }
 }
 
 WallpaperRenderer::~WallpaperRenderer()
@@ -92,6 +99,7 @@ WallpaperRenderer::~WallpaperRenderer()
         Gdiplus::GdiplusShutdown(gdiplusToken_);
         gdiplusToken_ = 0;
         gdiplusReady_ = false;
+        LogInfo(L"GDI+ shutdown");
     }
 }
 

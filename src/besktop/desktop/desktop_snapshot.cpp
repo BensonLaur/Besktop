@@ -1,5 +1,7 @@
 #include "besktop/desktop/desktop_snapshot.h"
 
+#include "besktop/logging/logger.h"
+
 #include <objbase.h>
 #include <shobjidl.h>
 
@@ -43,11 +45,17 @@ void CapturePrimaryMonitorBounds(besktop::DesktopSnapshot& snapshot)
     monitorInfo.cbSize = sizeof(monitorInfo);
     if (primaryMonitor != nullptr && GetMonitorInfoW(primaryMonitor, &monitorInfo)) {
         snapshot.monitorBounds = monitorInfo.rcMonitor;
+        besktop::LogInfo(
+            L"primary monitor captured: " +
+            std::to_wstring(monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left) +
+            L" x " +
+            std::to_wstring(monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top));
         return;
     }
 
     snapshot.monitorBounds = RECT{0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
     snapshot.warnings.push_back(L"Primary monitor rcMonitor unavailable; using screen metrics fallback.");
+    besktop::LogWarning(L"primary monitor fallback used");
 }
 
 void CaptureWallpaperSnapshot(besktop::DesktopSnapshot& snapshot)
@@ -58,7 +66,11 @@ void CaptureWallpaperSnapshot(besktop::DesktopSnapshot& snapshot)
         snapshot.wallpaper.usedFallback = true;
         snapshot.warnings.push_back(
             L"Wallpaper COM initialization failed (" + FormatHResult(initializeResult) + L").");
+        besktop::LogWarning(L"wallpaper COM initialization failed: " + FormatHResult(initializeResult));
         return;
+    }
+    if (initializeResult == RPC_E_CHANGED_MODE) {
+        besktop::LogWarning(L"COM apartment already initialized with a different mode");
     }
 
     IDesktopWallpaper* desktopWallpaper = nullptr;
@@ -72,6 +84,7 @@ void CaptureWallpaperSnapshot(besktop::DesktopSnapshot& snapshot)
         snapshot.wallpaper.usedFallback = true;
         snapshot.warnings.push_back(
             L"IDesktopWallpaper creation failed (" + FormatHResult(createResult) + L").");
+        besktop::LogWarning(L"IDesktopWallpaper creation failed: " + FormatHResult(createResult));
         if (shouldUninitialize) {
             CoUninitialize();
         }
@@ -82,10 +95,12 @@ void CaptureWallpaperSnapshot(besktop::DesktopSnapshot& snapshot)
     HRESULT wallpaperResult = desktopWallpaper->GetWallpaper(nullptr, &wallpaperPath);
     if (SUCCEEDED(wallpaperResult) && wallpaperPath != nullptr && wallpaperPath[0] != L'\0') {
         snapshot.wallpaper.path = wallpaperPath;
+        besktop::LogInfo(L"wallpaper path captured: " + snapshot.wallpaper.path);
     } else {
         snapshot.wallpaper.usedFallback = true;
         snapshot.warnings.push_back(
             L"Wallpaper path capture failed (" + FormatHResult(wallpaperResult) + L").");
+        besktop::LogWarning(L"wallpaper path capture failed: " + FormatHResult(wallpaperResult));
     }
     if (wallpaperPath != nullptr) {
         CoTaskMemFree(wallpaperPath);
@@ -95,10 +110,12 @@ void CaptureWallpaperSnapshot(besktop::DesktopSnapshot& snapshot)
     HRESULT positionResult = desktopWallpaper->GetPosition(&wallpaperPosition);
     if (SUCCEEDED(positionResult)) {
         snapshot.wallpaper.layout = MapWallpaperLayout(wallpaperPosition);
+        besktop::LogInfo(L"wallpaper layout captured: " + besktop::ToDisplayString(snapshot.wallpaper.layout));
     } else {
         snapshot.wallpaper.usedFallback = true;
         snapshot.warnings.push_back(
             L"Wallpaper layout capture failed (" + FormatHResult(positionResult) + L").");
+        besktop::LogWarning(L"wallpaper layout capture failed: " + FormatHResult(positionResult));
     }
 
     desktopWallpaper->Release();
@@ -130,6 +147,7 @@ void AddDemoIconFallbacks(besktop::DesktopSnapshot& snapshot)
     }
 
     snapshot.warnings.push_back(L"Real desktop icon scanning is not implemented; using demo icon fallback.");
+    besktop::LogWarning(L"real desktop icon scanning is not implemented; using demo icon fallback");
 }
 
 } // namespace
