@@ -1,5 +1,7 @@
 #include "besktop/app/stage_window.h"
 
+#include <string>
+
 namespace {
 
 constexpr wchar_t kStageWindowClassName[] = L"BesktopStageWindow";
@@ -32,6 +34,59 @@ HFONT CreateStageFont(HDC hdc, int pointSize, int weight)
 void DrawCenteredLine(HDC hdc, const wchar_t* text, RECT lineRect)
 {
     DrawTextW(hdc, text, -1, &lineRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+void DrawInfoLine(HDC hdc, const std::wstring& text, RECT lineRect)
+{
+    DrawTextW(hdc, text.c_str(), -1, &lineRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+}
+
+class ScopedGdiSelection {
+public:
+    explicit ScopedGdiSelection(HDC hdc)
+        : hdc_(hdc)
+    {
+    }
+
+    ScopedGdiSelection(const ScopedGdiSelection&) = delete;
+    ScopedGdiSelection& operator=(const ScopedGdiSelection&) = delete;
+
+    ~ScopedGdiSelection()
+    {
+        Restore();
+    }
+
+    void Select(HGDIOBJ object)
+    {
+        if (object == nullptr) {
+            return;
+        }
+
+        HGDIOBJ previous = SelectObject(hdc_, object);
+        if (previous != nullptr && previous != HGDI_ERROR && !hasOriginal_) {
+            original_ = previous;
+            hasOriginal_ = true;
+        }
+    }
+
+    void Restore()
+    {
+        if (hasOriginal_) {
+            SelectObject(hdc_, original_);
+            original_ = nullptr;
+            hasOriginal_ = false;
+        }
+    }
+
+private:
+    HDC hdc_ = nullptr;
+    HGDIOBJ original_ = nullptr;
+    bool hasOriginal_ = false;
+};
+
+std::wstring FormatMonitorSize(const RECT& bounds)
+{
+    return std::to_wstring(bounds.right - bounds.left) + L" x " + std::to_wstring(bounds.bottom - bounds.top);
 }
 
 } // namespace
@@ -68,6 +123,8 @@ int StageWindow::Run(int showCommand)
 
 bool StageWindow::Create(int showCommand)
 {
+    snapshot_ = CaptureDesktopSnapshot();
+
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
@@ -83,17 +140,12 @@ bool StageWindow::Create(int showCommand)
         return false;
     }
 
-    const POINT primaryPoint{0, 0};
-    HMONITOR primaryMonitor = MonitorFromPoint(primaryPoint, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO monitorInfo{};
-    monitorInfo.cbSize = sizeof(monitorInfo);
-    if (primaryMonitor == nullptr || !GetMonitorInfoW(primaryMonitor, &monitorInfo)) {
-        return false;
-    }
-
-    const RECT bounds = monitorInfo.rcMonitor;
+    const RECT bounds = snapshot_.monitorBounds;
     const int width = bounds.right - bounds.left;
     const int height = bounds.bottom - bounds.top;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
 
     hwnd_ = CreateWindowExW(
         WS_EX_APPWINDOW | WS_EX_TOPMOST,
@@ -144,22 +196,18 @@ void StageWindow::Paint()
 
     HFONT titleFont = CreateStageFont(hdc, 34, FW_SEMIBOLD);
     HFONT bodyFont = CreateStageFont(hdc, 18, FW_NORMAL);
-    HGDIOBJ previousFont = nullptr;
+    ScopedGdiSelection selectedFont(hdc);
 
     const int height = clientRect.bottom - clientRect.top;
     RECT titleRect = clientRect;
     titleRect.top = (height / 2) - 96;
     titleRect.bottom = titleRect.top + 56;
 
-    if (titleFont != nullptr) {
-        previousFont = SelectObject(hdc, titleFont);
-    }
+    selectedFont.Select(titleFont);
     SetTextColor(hdc, RGB(246, 248, 252));
     DrawCenteredLine(hdc, L"Besktop Stage Window MVP", titleRect);
 
-    if (bodyFont != nullptr) {
-        SelectObject(hdc, bodyFont);
-    }
+    selectedFont.Select(bodyFont);
     SetTextColor(hdc, RGB(190, 198, 210));
 
     RECT escRect = clientRect;
@@ -172,9 +220,31 @@ void StageWindow::Paint()
     hotkeyRect.bottom = hotkeyRect.top + 32;
     DrawCenteredLine(hdc, L"Ctrl + Shift + B \u5f3a\u5236\u9000\u51fa", hotkeyRect);
 
-    if (previousFont != nullptr) {
-        SelectObject(hdc, previousFont);
+    RECT infoRect = clientRect;
+    infoRect.left += 48;
+    infoRect.right -= 48;
+    infoRect.top = hotkeyRect.bottom + 36;
+    infoRect.bottom = infoRect.top + 26;
+
+    const std::wstring wallpaperPath =
+        snapshot_.wallpaper.path.empty() ? L"<fallback>" : snapshot_.wallpaper.path;
+    const std::wstring warning =
+        snapshot_.warnings.empty() ? L"None" : snapshot_.warnings.front();
+    const std::wstring infoLines[] = {
+        L"Monitor: " + FormatMonitorSize(snapshot_.monitorBounds),
+        L"Wallpaper: " + wallpaperPath,
+        L"Layout: " + ToDisplayString(snapshot_.wallpaper.layout),
+        L"Demo icons: " + std::to_wstring(snapshot_.icons.size()),
+        L"Warning: " + warning,
+    };
+
+    SetTextColor(hdc, RGB(150, 160, 174));
+    for (const std::wstring& line : infoLines) {
+        DrawInfoLine(hdc, line, infoRect);
+        OffsetRect(&infoRect, 0, 28);
     }
+
+    selectedFont.Restore();
     if (bodyFont != nullptr) {
         DeleteObject(bodyFont);
     }

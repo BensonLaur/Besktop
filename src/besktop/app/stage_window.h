@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include "besktop/desktop/desktop_snapshot.h"
+
 namespace besktop {
 
 class StageWindow {
@@ -25,6 +27,7 @@ private:
 
     HINSTANCE instance_ = nullptr;
     HWND hwnd_ = nullptr;
+    DesktopSnapshot snapshot_;
     bool forceExitHotkeyRegistered_ = false;
 };
 
