@@ -1,0 +1,30 @@
+# Build output
+build/
+build*/
+out/
+bin/
+obj/
+*.user
+*.suo
+*.vcxproj*
+*.sln
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+
+# Local runtime data
+.env
+*.log
+*.tmp
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini

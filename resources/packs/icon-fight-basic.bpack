@@ -1,0 +1,30 @@
+{
+  "manifest": {
+    "id": "icon-fight-basic",
+    "name": "Icon Fight Basic",
+    "version": "0.1.0",
+    "schemaVersion": 1,
+    "publisher": "Benson",
+    "requires": {
+      "besktopMinVersion": "0.1.0",
+      "entitlements": []
+    },
+    "entry": {
+      "interactions": "interactions/basic.json"
+    }
+  },
+  "interactions": {
+    "id": "basic-idle-demo",
+    "description": "MVP built-in free interaction pack.",
+    "actions": [
+      "idle",
+      "approach",
+      "punch",
+      "dodge"
+    ]
+  },
+  "signature": {
+    "algorithm": "mvp-embedded-resource",
+    "value": "trusted-by-build"
+  }
+}

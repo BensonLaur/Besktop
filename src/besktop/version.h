@@ -1,0 +1,7 @@
+#pragma once
+
+#define BESKTOP_PRODUCT_NAME "Besktop"
+#define BESKTOP_PLAY_MODE "Icon Fight"
+#define BESKTOP_VERSION_MAJOR 0
+#define BESKTOP_VERSION_MINOR 1
+#define BESKTOP_VERSION_PATCH 0

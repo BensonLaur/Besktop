@@ -1,0 +1,3 @@
+#include "besktop/resources/resource.h"
+
+IDR_BESKTOP_PACK_BASIC RCDATA "@BESKTOP_BASIC_PACK_PATH@"
