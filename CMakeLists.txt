@@ -37,11 +37,12 @@ target_compile_definitions(besktop_runtime PUBLIC
 add_executable(besktop WIN32
     src/besktop/app/stage_window.cpp
     src/besktop/desktop/desktop_snapshot.cpp
+    src/besktop/render/wallpaper_renderer.cpp
     src/main.cpp
     "${BESKTOP_GENERATED_RESOURCE_FILE}"
 )
 
-target_link_libraries(besktop PRIVATE Gdi32 Ole32 Shell32 User32)
+target_link_libraries(besktop PRIVATE Gdi32 Gdiplus Ole32 Shell32 User32)
 
 add_executable(besktop_mvp_cli
     tools/mvp_cli.cpp

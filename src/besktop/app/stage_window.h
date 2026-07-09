@@ -3,8 +3,11 @@
 #include <windows.h>
 
 #include "besktop/desktop/desktop_snapshot.h"
+#include "besktop/render/wallpaper_renderer.h"
 
 namespace besktop {
+
+int RunStageWindow(HINSTANCE instance, int showCommand);
 
 class StageWindow {
 public:
@@ -28,6 +31,7 @@ private:
     HINSTANCE instance_ = nullptr;
     HWND hwnd_ = nullptr;
     DesktopSnapshot snapshot_;
+    WallpaperRenderer wallpaperRenderer_;
     bool forceExitHotkeyRegistered_ = false;
 };
 

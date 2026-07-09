@@ -98,6 +98,12 @@ StageWindow::StageWindow(HINSTANCE instance)
 {
 }
 
+int RunStageWindow(HINSTANCE instance, int showCommand)
+{
+    StageWindow stageWindow(instance);
+    return stageWindow.Run(showCommand);
+}
+
 int StageWindow::Run(int showCommand)
 {
     if (!Create(showCommand)) {
@@ -169,6 +175,7 @@ bool StageWindow::Create(int showCommand)
 
     ShowWindow(hwnd_, showCommand == 0 ? SW_SHOW : showCommand);
     SetWindowPos(hwnd_, HWND_TOPMOST, bounds.left, bounds.top, width, height, SWP_SHOWWINDOW);
+    SetFocus(hwnd_);
     UpdateWindow(hwnd_);
     return true;
 }
@@ -191,6 +198,7 @@ void StageWindow::Paint()
     HBRUSH backgroundBrush = CreateSolidBrush(RGB(10, 12, 16));
     FillRect(hdc, &clientRect, backgroundBrush);
     DeleteObject(backgroundBrush);
+    wallpaperRenderer_.Draw(hdc, clientRect, snapshot_.wallpaper);
 
     SetBkMode(hdc, TRANSPARENT);
 
