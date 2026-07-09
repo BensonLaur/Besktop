@@ -31,7 +31,8 @@
 目标：从 demo actor 过渡到稳定读取和复刻真实桌面舞台。
 
 - 通过 `IDesktopWallpaper` 获取壁纸路径和显示方式。
-- 通过 Shell View / `IFolderView` 读取桌面图标位置、名称和图标图像。
+- 当前 MVP 通过桌面 `SysListView32` 只读采样读取图标位置和名称。
+- 后续替换或补强为 Shell View / `IFolderView` 与 Shell 图像接口。
 - 由 Besktop 绘制图标文字，支持抖动、错位、淡出。
 - 截取任务栏静态视觉。
 - 处理高 DPI。

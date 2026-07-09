@@ -35,6 +35,7 @@ target_compile_definitions(besktop_runtime PUBLIC
 )
 
 add_executable(besktop WIN32
+    src/besktop/animation/icon_fight_scene.cpp
     src/besktop/app/stage_window.cpp
     src/besktop/desktop/desktop_snapshot.cpp
     src/besktop/logging/logger.cpp

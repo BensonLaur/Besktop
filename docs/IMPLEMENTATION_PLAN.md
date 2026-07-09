@@ -70,8 +70,9 @@ DesktopIconSnapshot
 
 - 壁纸优先通过 `IDesktopWallpaper` 获取路径和显示方式。
 - 在桌面舞台中按同样规则重绘壁纸。
-- 图标优先通过 Shell View / `IFolderView` 获取位置和名称。
-- 图标图像优先通过 Shell 图像接口获取，失败时使用占位图标。
+- 图标目标方案是通过 Shell View / `IFolderView` 获取位置、名称和图像。
+- 当前视觉 MVP 先通过桌面 `SysListView32` 只读采样获取位置和名称。
+- 图标图像后续通过 Shell 图像接口获取；当前先使用抽象演员贴图。
 - 图标文字由 Besktop 自己绘制，不截图文字。
 - 任务栏第一版可以截取静态图像并绘制在舞台底部。
 - 如果真实桌面采集失败，进入 demo actor 模式，仍显示可验证动画。

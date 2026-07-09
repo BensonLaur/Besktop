@@ -76,11 +76,18 @@ packs/
 首选路径：
 
 1. 使用 `IDesktopWallpaper` 获取当前显示器壁纸路径和显示方式。
-2. 通过 Shell View / `IFolderView` 读取 Explorer 桌面图标视图。
+2. 目标路径是通过 Shell View / `IFolderView` 读取 Explorer 桌面图标视图。
 3. 获取可见图标的位置、名称和图标图像。
 4. 由 Besktop 自己绘制图标文字，而不是截图文字。
 5. 截取任务栏区域作为第一版静态视觉。
 6. 为每个图标创建 `IconActor`。
+
+当前视觉 MVP 的落地路径：
+
+1. 壁纸仍通过 `IDesktopWallpaper` 获取。
+2. 图标位置和名称先通过桌面 `SysListView32` 只读采样获取。
+3. 图标图像暂时使用抽象演员贴图，后续再接入 Shell 图像接口。
+4. 采样失败时继续进入 demo actor 模式，保证动画可见。
 
 容错路径：
 

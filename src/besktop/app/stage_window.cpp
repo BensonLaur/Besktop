@@ -1,5 +1,6 @@
 #include "besktop/app/stage_window.h"
 
+#include "besktop/animation/icon_fight_scene.h"
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/logging/logger.h"
 #include "besktop/render/wallpaper_renderer.h"
@@ -10,83 +11,13 @@ namespace {
 
 constexpr wchar_t kStageWindowClassName[] = L"BesktopStageWindow";
 constexpr int kForceExitHotkeyId = 1;
+constexpr UINT_PTR kAnimationTimerId = 2;
+constexpr UINT kAnimationFrameMs = 16;
 
 bool IsKeyPressed(int virtualKey)
 {
     return (GetKeyState(virtualKey) & 0x8000) != 0;
 }
-
-HFONT CreateStageFont(HDC hdc, int pointSize, int weight)
-{
-    return CreateFontW(
-        -MulDiv(pointSize, GetDeviceCaps(hdc, LOGPIXELSY), 72),
-        0,
-        0,
-        0,
-        weight,
-        FALSE,
-        FALSE,
-        FALSE,
-        DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS,
-        L"Microsoft YaHei UI");
-}
-
-void DrawCenteredLine(HDC hdc, const wchar_t* text, RECT lineRect)
-{
-    DrawTextW(hdc, text, -1, &lineRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-}
-
-void DrawInfoLine(HDC hdc, const std::wstring& text, RECT lineRect)
-{
-    DrawTextW(hdc, text.c_str(), -1, &lineRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-}
-
-class ScopedGdiSelection {
-public:
-    explicit ScopedGdiSelection(HDC hdc)
-        : hdc_(hdc)
-    {
-    }
-
-    ScopedGdiSelection(const ScopedGdiSelection&) = delete;
-    ScopedGdiSelection& operator=(const ScopedGdiSelection&) = delete;
-
-    ~ScopedGdiSelection()
-    {
-        Restore();
-    }
-
-    void Select(HGDIOBJ object)
-    {
-        if (object == nullptr) {
-            return;
-        }
-
-        HGDIOBJ previous = SelectObject(hdc_, object);
-        if (previous != nullptr && previous != HGDI_ERROR && !hasOriginal_) {
-            original_ = previous;
-            hasOriginal_ = true;
-        }
-    }
-
-    void Restore()
-    {
-        if (hasOriginal_) {
-            SelectObject(hdc_, original_);
-            original_ = nullptr;
-            hasOriginal_ = false;
-        }
-    }
-
-private:
-    HDC hdc_ = nullptr;
-    HGDIOBJ original_ = nullptr;
-    bool hasOriginal_ = false;
-};
 
 std::wstring FormatMonitorSize(const RECT& bounds)
 {
@@ -121,6 +52,10 @@ private:
     HWND hwnd_ = nullptr;
     DesktopSnapshot snapshot_;
     WallpaperRenderer wallpaperRenderer_;
+    IconFightScene scene_;
+    ULONGLONG animationStartTick_ = 0;
+    double elapsedSeconds_ = 0.0;
+    bool animationTimerStarted_ = false;
     bool forceExitHotkeyRegistered_ = false;
     bool wallpaperDrawLogged_ = false;
 };
@@ -212,10 +147,18 @@ bool StageWindow::Create(int showCommand)
     }
 
     RegisterForceExitHotkey();
+    scene_.Reset(snapshot_, RECT{0, 0, width, height});
 
     ShowWindow(hwnd_, showCommand == 0 ? SW_SHOW : showCommand);
     SetWindowPos(hwnd_, HWND_TOPMOST, bounds.left, bounds.top, width, height, SWP_SHOWWINDOW);
     SetFocus(hwnd_);
+    animationStartTick_ = GetTickCount64();
+    animationTimerStarted_ = SetTimer(hwnd_, kAnimationTimerId, kAnimationFrameMs, nullptr) != 0;
+    if (animationTimerStarted_) {
+        LogInfo(L"animation timer started: " + std::to_wstring(kAnimationFrameMs) + L"ms");
+    } else {
+        LogWarning(L"animation timer failed: " + std::to_wstring(GetLastError()));
+    }
     UpdateWindow(hwnd_);
     LogInfo(L"stage window created: " + FormatMonitorSize(bounds));
     return true;
@@ -232,15 +175,30 @@ void StageWindow::Close()
 void StageWindow::Paint()
 {
     PAINTSTRUCT paint{};
-    HDC hdc = BeginPaint(hwnd_, &paint);
+    HDC paintHdc = BeginPaint(hwnd_, &paint);
 
     RECT clientRect{};
     GetClientRect(hwnd_, &clientRect);
+    const int width = clientRect.right - clientRect.left;
+    const int height = clientRect.bottom - clientRect.top;
+    if (width <= 0 || height <= 0) {
+        EndPaint(hwnd_, &paint);
+        return;
+    }
+
+    HDC bufferHdc = CreateCompatibleDC(paintHdc);
+    HBITMAP bufferBitmap = CreateCompatibleBitmap(paintHdc, width, height);
+    HGDIOBJ previousBitmap = nullptr;
+    HDC renderHdc = paintHdc;
+    if (bufferHdc != nullptr && bufferBitmap != nullptr) {
+        previousBitmap = SelectObject(bufferHdc, bufferBitmap);
+        renderHdc = bufferHdc;
+    }
 
     HBRUSH backgroundBrush = CreateSolidBrush(RGB(10, 12, 16));
-    FillRect(hdc, &clientRect, backgroundBrush);
+    FillRect(renderHdc, &clientRect, backgroundBrush);
     DeleteObject(backgroundBrush);
-    const bool wallpaperDrawn = wallpaperRenderer_.Draw(hdc, clientRect, snapshot_.wallpaper);
+    const bool wallpaperDrawn = wallpaperRenderer_.Draw(renderHdc, clientRect, snapshot_.wallpaper);
     if (!wallpaperDrawLogged_) {
         wallpaperDrawLogged_ = true;
         if (wallpaperDrawn) {
@@ -250,64 +208,19 @@ void StageWindow::Paint()
         }
     }
 
-    SetBkMode(hdc, TRANSPARENT);
+    scene_.Render(renderHdc, clientRect);
 
-    HFONT titleFont = CreateStageFont(hdc, 34, FW_SEMIBOLD);
-    HFONT bodyFont = CreateStageFont(hdc, 18, FW_NORMAL);
-    ScopedGdiSelection selectedFont(hdc);
-
-    const int height = clientRect.bottom - clientRect.top;
-    RECT titleRect = clientRect;
-    titleRect.top = (height / 2) - 96;
-    titleRect.bottom = titleRect.top + 56;
-
-    selectedFont.Select(titleFont);
-    SetTextColor(hdc, RGB(246, 248, 252));
-    DrawCenteredLine(hdc, L"Besktop Stage Window MVP", titleRect);
-
-    selectedFont.Select(bodyFont);
-    SetTextColor(hdc, RGB(190, 198, 210));
-
-    RECT escRect = clientRect;
-    escRect.top = titleRect.bottom + 28;
-    escRect.bottom = escRect.top + 32;
-    DrawCenteredLine(hdc, L"Esc \u9000\u51fa", escRect);
-
-    RECT hotkeyRect = clientRect;
-    hotkeyRect.top = escRect.bottom + 12;
-    hotkeyRect.bottom = hotkeyRect.top + 32;
-    DrawCenteredLine(hdc, L"Ctrl + Shift + B \u5f3a\u5236\u9000\u51fa", hotkeyRect);
-
-    RECT infoRect = clientRect;
-    infoRect.left += 48;
-    infoRect.right -= 48;
-    infoRect.top = hotkeyRect.bottom + 36;
-    infoRect.bottom = infoRect.top + 26;
-
-    const std::wstring wallpaperPath =
-        snapshot_.wallpaper.path.empty() ? L"<fallback>" : snapshot_.wallpaper.path;
-    const std::wstring warning =
-        snapshot_.warnings.empty() ? L"None" : snapshot_.warnings.front();
-    const std::wstring infoLines[] = {
-        L"Monitor: " + FormatMonitorSize(snapshot_.monitorBounds),
-        L"Wallpaper: " + wallpaperPath,
-        L"Layout: " + ToDisplayString(snapshot_.wallpaper.layout),
-        L"Demo icons: " + std::to_wstring(snapshot_.icons.size()),
-        L"Warning: " + warning,
-    };
-
-    SetTextColor(hdc, RGB(150, 160, 174));
-    for (const std::wstring& line : infoLines) {
-        DrawInfoLine(hdc, line, infoRect);
-        OffsetRect(&infoRect, 0, 28);
+    if (renderHdc == bufferHdc) {
+        BitBlt(paintHdc, 0, 0, width, height, bufferHdc, 0, 0, SRCCOPY);
     }
-
-    selectedFont.Restore();
-    if (bodyFont != nullptr) {
-        DeleteObject(bodyFont);
+    if (previousBitmap != nullptr) {
+        SelectObject(bufferHdc, previousBitmap);
     }
-    if (titleFont != nullptr) {
-        DeleteObject(titleFont);
+    if (bufferBitmap != nullptr) {
+        DeleteObject(bufferBitmap);
+    }
+    if (bufferHdc != nullptr) {
+        DeleteDC(bufferHdc);
     }
 
     EndPaint(hwnd_, &paint);
@@ -341,7 +254,7 @@ void StageWindow::LogSnapshot() const
         L"wallpaper path: " +
         (snapshot_.wallpaper.path.empty() ? std::wstring(L"<fallback>") : snapshot_.wallpaper.path));
     LogInfo(L"wallpaper layout: " + ToDisplayString(snapshot_.wallpaper.layout));
-    LogInfo(L"demo icons: " + std::to_wstring(snapshot_.icons.size()));
+    LogInfo(L"desktop icons: " + std::to_wstring(snapshot_.icons.size()));
     for (const std::wstring& warning : snapshot_.warnings) {
         LogWarning(L"snapshot warning: " + warning);
     }
@@ -365,6 +278,15 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         break;
+    case WM_TIMER:
+        if (wParam == kAnimationTimerId) {
+            const ULONGLONG now = GetTickCount64();
+            elapsedSeconds_ = static_cast<double>(now - animationStartTick_) / 1000.0;
+            scene_.Update(elapsedSeconds_);
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
+        break;
     case WM_CLOSE:
         Close();
         return 0;
@@ -374,6 +296,11 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         Paint();
         return 0;
     case WM_DESTROY:
+        if (animationTimerStarted_) {
+            KillTimer(hwnd_, kAnimationTimerId);
+            animationTimerStarted_ = false;
+            LogInfo(L"animation timer stopped");
+        }
         UnregisterForceExitHotkey();
         LogInfo(L"WM_DESTROY; posting quit message");
         PostQuitMessage(0);
