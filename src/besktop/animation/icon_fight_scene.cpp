@@ -13,6 +13,7 @@
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+constexpr size_t kMaxDesktopActors = 9;
 
 double Clamp01(double value)
 {
@@ -1079,7 +1080,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         };
     };
 
-    const size_t count = std::min<size_t>(snapshot.icons.size(), 5);
+    const size_t count = std::min(snapshot.icons.size(), kMaxDesktopActors);
     for (size_t index = 0; index < count; ++index) {
         const DesktopIconSnapshot& icon = snapshot.icons[index];
         const bool hasIconBounds = icon.iconBounds.right > icon.iconBounds.left &&
