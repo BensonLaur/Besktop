@@ -667,10 +667,10 @@ LimbPose BuildLimbPose(
     const double rightDepthSign = rightFront ? 1.0 : -1.0;
     const double leftDepthSign = -rightDepthSign;
     const double headingSign = HeadingSign(pose);
-    const double bodySideOut = std::clamp(planeSide * 0.07, 4.0, 9.0);
-    const double smallHipExtraOut = std::clamp(planeSide * 0.02, 0.0, 4.0);
+    const double bodySideInset = std::clamp(planeSide * 0.035, 2.0, 5.0);
+    const double smallHipExtraOut = 0.0;
     const double hipDownOut = std::clamp(planeSide * 0.18, 12.0, 24.0);
-    const double sideAttachX = headingSign * (halfW + bodySideOut);
+    const double sideAttachX = headingSign * (halfW - bodySideInset);
     const double shoulderRootX = sideAttachX;
     const double shoulderRootY = -halfH * 0.20;
     const Vec3 leftShoulder{shoulderRootX, shoulderRootY, leftDepthSign * shoulderDepth};
@@ -1031,7 +1031,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     }
 
     LogInfo(L"icon fight scene reset; actors: " + std::to_wstring(actors_.size()));
-    LogInfo(L"icon fight limb model: local 3D foot plant locomotion; stance=0.60, shared side attach shoulder/hip roots; two-bone leg IK; upperArm=0.30 planeSide, forearm=0.32, thigh=0.40, shin=0.41; bodySideOut=0.07, hipExtraOut=0.02, hipDownOut=0.18");
+    LogInfo(L"icon fight limb model: local 3D foot plant locomotion; stance=0.60, shared side attach shoulder/hip roots; two-bone leg IK; upperArm=0.30 planeSide, forearm=0.32, thigh=0.40, shin=0.41; bodySideInset=0.035, hipExtraOut=0.0, hipDownOut=0.18");
     LogInfo(L"icon fight body model: double-sided icon plane; back face keeps non-mirrored icon UV order");
     LogInfo(std::wstring(L"icon fight render shadows: ") + (RenderShadowsEnabled() ? L"enabled" : L"disabled"));
     size_t boundActorCount = 0;
