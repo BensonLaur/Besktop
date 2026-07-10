@@ -71,6 +71,12 @@ bool RenderShadowsEnabled()
     return enabled;
 }
 
+bool DebugIconPlaneEnabled()
+{
+    static const bool enabled = IsTruthyEnvironmentFlag(L"BESKTOP_DEBUG_ICON_PLANE");
+    return enabled;
+}
+
 double LerpValue(double from, double to, double t);
 double Wrap01(double value);
 
@@ -834,7 +840,7 @@ bool DrawActorIconBody(
     }
 
     const BYTE borderAlpha = static_cast<BYTE>(std::clamp(SmoothStep(0.45, 1.0, pose.bodyEffect) * 42.0, 0.0, 42.0));
-    if (borderAlpha > 0) {
+    if (DebugIconPlaneEnabled() && borderAlpha > 0) {
         Gdiplus::Pen border(Gdiplus::Color(borderAlpha, 255, 255, 255), 1.5f);
         graphics.DrawPolygon(&border, bodyPoints, static_cast<INT>(pointCount));
     }
@@ -1034,6 +1040,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     LogInfo(L"icon fight limb model: local 3D foot plant locomotion; stance=0.60, shared side attach shoulder/hip roots; two-bone leg IK; upperArm=0.30 planeSide, forearm=0.32, thigh=0.40, shin=0.41; bodySideInset=0.035, hipExtraOut=0.0, hipDownOut=0.18");
     LogInfo(L"icon fight body model: double-sided icon plane; back face keeps non-mirrored icon UV order");
     LogInfo(std::wstring(L"icon fight render shadows: ") + (RenderShadowsEnabled() ? L"enabled" : L"disabled"));
+    LogInfo(std::wstring(L"icon fight debug icon plane: ") + (DebugIconPlaneEnabled() ? L"enabled" : L"disabled"));
     size_t boundActorCount = 0;
     for (const IconActor& actor : actors_) {
         LogInfo(
