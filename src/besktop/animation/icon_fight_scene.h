@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -19,18 +20,29 @@ public:
     // Public for the small free functions in the implementation file; this is
     // still an internal scene type, not a plugin-facing API.
     enum class ScenePhase {
-        Calm,
-        TextShaking,
+        Sleeping,
         Awakening,
-        Fighting,
+        GrowingLimbs,
+        Wandering,
     };
 
     struct IconActor {
         std::wstring label;
         double baseX = 0.0;
         double baseY = 0.0;
+        // Legacy preview centers retained for the reusable locomotion prototype.
         double battleX = 0.0;
         double battleY = 0.0;
+        double x = 0.0;
+        double y = 0.0;
+        double targetX = 0.0;
+        double targetY = 0.0;
+        double walkSpeed = 80.0;
+        double waitRemaining = 0.0;
+        double awakeningDelay = 0.0;
+        double localElapsed = 0.0;
+        double facing = 1.0;
+        std::uint32_t randomState = 1;
         RECT labelBounds{};
         bool usedLabelBoundsFallback = true;
         double planeWidth = 48.0;
@@ -48,12 +60,15 @@ public:
 private:
     ScenePhase DeterminePhase(double elapsedSeconds) const;
     void LogPhase(ScenePhase phase);
+    void ChooseWanderTarget(IconActor& actor);
 
     std::vector<IconActor> actors_;
     IconImageCache iconImageCache_;
     RECT monitorBounds_{};
+    RECT clientBounds_{};
     double elapsedSeconds_ = 0.0;
-    ScenePhase phase_ = ScenePhase::Calm;
+    double previousElapsedSeconds_ = 0.0;
+    ScenePhase phase_ = ScenePhase::Sleeping;
 };
 
 } // namespace besktop

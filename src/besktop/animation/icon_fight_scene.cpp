@@ -13,7 +13,9 @@
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr size_t kMaxDesktopActors = 9;
+constexpr double kAwakeningStartSeconds = 0.30;
+constexpr double kAwakeningDurationSeconds = 0.48;
+constexpr double kLimbGrowthDurationSeconds = 0.72;
 
 double Clamp01(double value)
 {
@@ -255,7 +257,7 @@ WalkLegSample SampleWalkLeg(double walkPhase, double phaseOffset, double stride,
     return sample;
 }
 
-ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elapsedSeconds)
+ActorPose BuildLegacyPose(const besktop::IconFightScene::IconActor& actor, double elapsedSeconds)
 {
     constexpr double kWalkStartSeconds = 1.80;
     constexpr double kWalkDurationSeconds = 2.20;
@@ -337,6 +339,46 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
     pose.rotateX += DegreesToRadians(std::cos(pose.walkPhase * 2.0 * kPi) * 2.4 * pose.limbGrow);
     pose.rotateY += DegreesToRadians(rotateYDegrees * pose.limbGrow);
     pose.rotateZ += DegreesToRadians(headingSign * std::sin(pose.walkPhase * 2.0 * kPi) * 2.8 * pose.limbGrow);
+    return pose;
+}
+
+ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elapsedSeconds)
+{
+    const double actorTime = std::max(0.0, elapsedSeconds - actor.awakeningDelay - kAwakeningStartSeconds);
+    const bool wandering = actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
+
+    ActorPose pose;
+    pose.x = actor.x;
+    pose.y = actor.y;
+    pose.bodyEffect = SmoothStep(0.0, kAwakeningDurationSeconds, actorTime);
+    pose.limbGrow = SmoothStep(
+        kAwakeningDurationSeconds * 0.45,
+        kAwakeningDurationSeconds + kLimbGrowthDurationSeconds,
+        actorTime);
+    pose.labelAlpha = 1.0 - SmoothStep(
+        kAwakeningDurationSeconds * 0.55,
+        kAwakeningDurationSeconds + kLimbGrowthDurationSeconds,
+        actorTime);
+    pose.walkPhase = std::fmod(std::max(0.0, actor.localElapsed) * 1.75 + actor.role * 0.17, 1.0);
+    pose.gait = std::sin(pose.walkPhase * 2.0 * kPi);
+    pose.facing = actor.facing;
+    pose.heading = actor.facing < 0.0 ? ActorPose::Heading::MoveLeft : ActorPose::Heading::MoveRight;
+    pose.attackingRight = actor.facing > 0.0;
+    pose.rotateX = DegreesToRadians(std::sin((actorTime * 4.2) + actor.role) * 3.0 * pose.bodyEffect);
+    pose.rotateY = DegreesToRadians(actor.facing * 5.0 * pose.limbGrow);
+    pose.rotateZ = DegreesToRadians(std::sin((actorTime * 3.0) + actor.role) * 2.0 * pose.bodyEffect);
+
+    if (wandering && actor.waitRemaining <= 0.0) {
+        const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+        const WalkLegSample rightStep = SampleWalkLeg(pose.walkPhase, 0.0, 1.0, 1.0);
+        const WalkLegSample leftStep = SampleWalkLeg(pose.walkPhase, 0.5, 1.0, 1.0);
+        const double doublePlant = std::clamp(rightStep.plantWeight + leftStep.plantWeight - 1.0, 0.0, 1.0);
+        const double swingLift = std::max(rightStep.footLift, leftStep.footLift);
+        const double bobAmplitude = std::clamp(planeSide * 0.035, 2.0, 4.5);
+        pose.bob = ((doublePlant * 0.70) - (swingLift * 0.85)) * bobAmplitude;
+        pose.rotateX += DegreesToRadians(std::cos(pose.walkPhase * 2.0 * kPi) * 2.4);
+        pose.rotateZ += DegreesToRadians(actor.facing * std::sin(pose.walkPhase * 2.0 * kPi) * 2.8);
+    }
     return pose;
 }
 
@@ -1020,15 +1062,15 @@ void DrawActorLabel(
 const wchar_t* PhaseName(besktop::IconFightScene::ScenePhase phase)
 {
     switch (phase) {
-    case besktop::IconFightScene::ScenePhase::TextShaking:
-        return L"text-shaking";
     case besktop::IconFightScene::ScenePhase::Awakening:
         return L"awakening";
-    case besktop::IconFightScene::ScenePhase::Fighting:
-        return L"walking-preview";
-    case besktop::IconFightScene::ScenePhase::Calm:
+    case besktop::IconFightScene::ScenePhase::GrowingLimbs:
+        return L"growing-limbs";
+    case besktop::IconFightScene::ScenePhase::Wandering:
+        return L"wandering";
+    case besktop::IconFightScene::ScenePhase::Sleeping:
     default:
-        return L"calm";
+        return L"sleeping";
     }
 }
 
@@ -1041,8 +1083,10 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     actors_.clear();
     iconImageCache_.Clear();
     monitorBounds_ = snapshot.monitorBounds;
+    clientBounds_ = clientRect;
     elapsedSeconds_ = 0.0;
-    phase_ = ScenePhase::Calm;
+    previousElapsedSeconds_ = 0.0;
+    phase_ = ScenePhase::Sleeping;
 
     const unsigned char colors[][3] = {
         {44, 135, 255},
@@ -1069,14 +1113,6 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     const std::wstring planeSizeSource = hasImageListSize ?
         snapshot.iconDisplay.source :
         std::wstring(L"scene fallback");
-    const double previewMarginX = std::max(160.0, displayPlaneWidth * 2.4);
-    const double previewMarginY = std::max(150.0, displayPlaneHeight * 2.4);
-    const auto clampPreviewCenter = [](double value, double margin, double extent) {
-        if (extent <= margin * 2.0) {
-            return extent * 0.5;
-        }
-        return std::clamp(value, margin, extent - margin);
-    };
     const auto scaleDesktopRect = [&](const RECT& rect) {
         return RECT{
             static_cast<LONG>((rect.left - snapshot.monitorBounds.left) * scaleX),
@@ -1086,7 +1122,8 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         };
     };
 
-    const size_t count = std::min(snapshot.icons.size(), kMaxDesktopActors);
+    const size_t count = snapshot.icons.size();
+    const double staggerStep = count > 1 ? std::clamp(2.4 / static_cast<double>(count - 1), 0.05, 0.12) : 0.0;
     for (size_t index = 0; index < count; ++index) {
         const DesktopIconSnapshot& icon = snapshot.icons[index];
         const bool hasIconBounds = icon.iconBounds.right > icon.iconBounds.left &&
@@ -1097,8 +1134,10 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.label = icon.displayName.empty() ? (L"Icon " + std::to_wstring(index + 1)) : icon.displayName;
         actor.baseX = (((planeBounds.left + planeBounds.right) * 0.5) - snapshot.monitorBounds.left) * scaleX;
         actor.baseY = (((planeBounds.top + planeBounds.bottom) * 0.5) - snapshot.monitorBounds.top) * scaleY;
-        actor.battleX = clampPreviewCenter(actor.baseX, previewMarginX, clientWidth);
-        actor.battleY = clampPreviewCenter(actor.baseY, previewMarginY, clientHeight);
+        actor.x = actor.baseX;
+        actor.y = actor.baseY;
+        actor.battleX = actor.baseX;
+        actor.battleY = actor.baseY;
         actor.labelBounds = scaleDesktopRect(icon.labelBounds);
         actor.usedLabelBoundsFallback = icon.usedLabelBoundsFallback;
         actor.planeWidth = displayPlaneWidth;
@@ -1106,6 +1145,12 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.usedPlaneFallback = !hasImageListSize || snapshot.iconDisplay.usedFallback;
         actor.planeSizeSource = planeSizeSource;
         actor.role = static_cast<int>(index);
+        actor.randomState = 0x9E3779B9u ^ (static_cast<std::uint32_t>(index + 1) * 0x85EBCA6Bu);
+        actor.randomState ^= actor.randomState >> 16;
+        const double jitter = static_cast<double>(actor.randomState % 41u) / 1000.0;
+        actor.awakeningDelay = static_cast<double>(index) * staggerStep + jitter;
+        actor.walkSpeed = 58.0 + static_cast<double>((actor.randomState >> 8) % 49u);
+        actor.facing = (actor.randomState & 1u) == 0u ? 1.0 : -1.0;
         actor.red = colors[index % std::size(colors)][0];
         actor.green = colors[index % std::size(colors)][1];
         actor.blue = colors[index % std::size(colors)][2];
@@ -1114,30 +1159,8 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actors_.push_back(actor);
     }
 
-    while (actors_.size() < 3) {
-        const int index = static_cast<int>(actors_.size());
-        IconActor actor;
-        actor.label = L"Icon " + std::to_wstring(index + 1);
-        actor.baseX = (clientRect.right - clientRect.left) * 0.5 + (index - 1) * 116.0;
-        actor.baseY = (clientRect.bottom - clientRect.top) * 0.64;
-        actor.battleX = actor.baseX;
-        actor.battleY = actor.baseY;
-        actor.labelBounds = RECT{
-            static_cast<LONG>(actor.baseX - 82.0),
-            static_cast<LONG>(actor.baseY + 30.0),
-            static_cast<LONG>(actor.baseX + 82.0),
-            static_cast<LONG>(actor.baseY + 66.0),
-        };
-        actor.usedLabelBoundsFallback = true;
-        actor.planeWidth = 48.0;
-        actor.planeHeight = 48.0;
-        actor.usedPlaneFallback = true;
-        actor.planeSizeSource = L"demo fallback";
-        actor.role = index;
-        actor.red = colors[index % std::size(colors)][0];
-        actor.green = colors[index % std::size(colors)][1];
-        actor.blue = colors[index % std::size(colors)][2];
-        actors_.push_back(actor);
+    for (IconActor& actor : actors_) {
+        ChooseWanderTarget(actor);
     }
 
     LogInfo(L"icon fight scene reset; actors: " + std::to_wstring(actors_.size()));
@@ -1209,12 +1232,66 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
 
 void IconFightScene::Update(double elapsedSeconds)
 {
+    const double deltaSeconds = std::clamp(elapsedSeconds - previousElapsedSeconds_, 0.0, 0.10);
+    previousElapsedSeconds_ = elapsedSeconds;
     elapsedSeconds_ = elapsedSeconds;
+    for (IconActor& actor : actors_) {
+        const double actorTime = elapsedSeconds_ - kAwakeningStartSeconds - actor.awakeningDelay;
+        if (actorTime < kAwakeningDurationSeconds + kLimbGrowthDurationSeconds) {
+            actor.x = actor.baseX;
+            actor.y = actor.baseY;
+            continue;
+        }
+
+        actor.localElapsed += deltaSeconds;
+        if (actor.waitRemaining > 0.0) {
+            actor.waitRemaining = std::max(0.0, actor.waitRemaining - deltaSeconds);
+            if (actor.waitRemaining <= 0.0) {
+                ChooseWanderTarget(actor);
+            }
+            continue;
+        }
+
+        const double dx = actor.targetX - actor.x;
+        const double dy = actor.targetY - actor.y;
+        const double distance = std::sqrt((dx * dx) + (dy * dy));
+        const double step = actor.walkSpeed * deltaSeconds;
+        if (distance <= std::max(1.0, step)) {
+            actor.x = actor.targetX;
+            actor.y = actor.targetY;
+            actor.randomState = actor.randomState * 1664525u + 1013904223u;
+            actor.waitRemaining = 0.20 + (static_cast<double>(actor.randomState % 1001u) / 1000.0);
+        } else {
+            actor.facing = dx < 0.0 ? -1.0 : 1.0;
+            actor.x += (dx / distance) * step;
+            actor.y += (dy / distance) * step;
+        }
+    }
     const ScenePhase nextPhase = DeterminePhase(elapsedSeconds_);
     if (nextPhase != phase_) {
         phase_ = nextPhase;
         LogPhase(phase_);
     }
+}
+
+void IconFightScene::ChooseWanderTarget(IconActor& actor)
+{
+    const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+    const double sideMargin = std::max(24.0, planeSide * 1.15);
+    const double topMargin = std::max(24.0, planeSide * 0.80);
+    // TODO: replace this concentrated DPI-scaled safety margin with a captured taskbar rectangle.
+    const double taskbarSafety = std::max(64.0, planeSide * 1.75);
+    const double minX = clientBounds_.left + sideMargin;
+    const double maxX = clientBounds_.right - sideMargin;
+    const double minY = clientBounds_.top + topMargin;
+    const double maxY = clientBounds_.bottom - taskbarSafety;
+
+    const auto nextUnit = [&actor]() {
+        actor.randomState = actor.randomState * 1664525u + 1013904223u;
+        return static_cast<double>(actor.randomState & 0x00FFFFFFu) / 16777215.0;
+    };
+    actor.targetX = maxX > minX ? minX + (maxX - minX) * nextUnit() : (clientBounds_.left + clientBounds_.right) * 0.5;
+    actor.targetY = maxY > minY ? minY + (maxY - minY) * nextUnit() : (clientBounds_.top + clientBounds_.bottom) * 0.5;
 }
 
 void IconFightScene::Render(HDC hdc, const RECT& clientRect) const
@@ -1268,16 +1345,20 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect) const
 
 IconFightScene::ScenePhase IconFightScene::DeterminePhase(double elapsedSeconds) const
 {
-    if (elapsedSeconds < 0.30) {
-        return ScenePhase::Calm;
+    if (elapsedSeconds < kAwakeningStartSeconds) {
+        return ScenePhase::Sleeping;
     }
-    if (elapsedSeconds < 0.90) {
-        return ScenePhase::TextShaking;
-    }
-    if (elapsedSeconds < 1.80) {
+    if (elapsedSeconds < kAwakeningStartSeconds + kAwakeningDurationSeconds) {
         return ScenePhase::Awakening;
     }
-    return ScenePhase::Fighting;
+    double lastDelay = 0.0;
+    for (const IconActor& actor : actors_) {
+        lastDelay = std::max(lastDelay, actor.awakeningDelay);
+    }
+    if (elapsedSeconds < kAwakeningStartSeconds + lastDelay + kAwakeningDurationSeconds + kLimbGrowthDurationSeconds) {
+        return ScenePhase::GrowingLimbs;
+    }
+    return ScenePhase::Wandering;
 }
 
 void IconFightScene::LogPhase(ScenePhase phase)
