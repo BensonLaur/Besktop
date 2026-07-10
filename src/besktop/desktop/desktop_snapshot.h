@@ -23,16 +23,33 @@ struct WallpaperSnapshot {
     bool usedFallback = false;
 };
 
+struct DesktopIconImageSnapshot {
+    std::wstring sourcePath;
+    bool usedFallback = true;
+    std::wstring warning;
+};
+
+struct DesktopIconDisplayMetrics {
+    SIZE imageListIconSize{};
+    bool usedFallback = true;
+    std::wstring source;
+};
+
 struct DesktopIconSnapshot {
     std::wstring id;
     std::wstring displayName;
+    POINT listViewPosition{};
     RECT bounds{};
+    RECT iconBounds{};
+    bool usedIconBoundsFallback = true;
+    DesktopIconImageSnapshot image;
     bool usedFallback = true;
 };
 
 struct DesktopSnapshot {
     RECT monitorBounds{};
     WallpaperSnapshot wallpaper;
+    DesktopIconDisplayMetrics iconDisplay;
     std::vector<DesktopIconSnapshot> icons;
     std::vector<std::wstring> warnings;
 };

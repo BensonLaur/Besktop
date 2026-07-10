@@ -5,6 +5,10 @@
 #include "besktop/logging/logger.h"
 #include "besktop/render/wallpaper_renderer.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 
 namespace {
@@ -22,6 +26,86 @@ bool IsKeyPressed(int virtualKey)
 std::wstring FormatMonitorSize(const RECT& bounds)
 {
     return std::to_wstring(bounds.right - bounds.left) + L" x " + std::to_wstring(bounds.bottom - bounds.top);
+}
+
+std::wstring FormatRect(const RECT& rect)
+{
+    return L"(" +
+        std::to_wstring(rect.left) +
+        L"," +
+        std::to_wstring(rect.top) +
+        L")-(" +
+        std::to_wstring(rect.right) +
+        L"," +
+        std::to_wstring(rect.bottom) +
+        L") " +
+        FormatMonitorSize(rect);
+}
+
+std::wstring FormatDouble(double value, int precision = 1)
+{
+    wchar_t buffer[64]{};
+    swprintf_s(buffer, L"%.*f", precision, value);
+    return buffer;
+}
+
+bool IsTruthyEnvironmentFlag(const wchar_t* name)
+{
+    wchar_t value[16]{};
+    constexpr auto valueCapacity = static_cast<DWORD>(sizeof(value) / sizeof(value[0]));
+    const DWORD length = GetEnvironmentVariableW(name, value, valueCapacity);
+    if (length == 0 || length >= valueCapacity) {
+        return false;
+    }
+
+    return value[0] == L'1' ||
+        value[0] == L't' ||
+        value[0] == L'T' ||
+        value[0] == L'y' ||
+        value[0] == L'Y' ||
+        value[0] == L'o' ||
+        value[0] == L'O';
+}
+
+double ReadEnvironmentDouble(const wchar_t* name, double fallback, double minimum, double maximum)
+{
+    wchar_t value[64]{};
+    constexpr auto valueCapacity = static_cast<DWORD>(sizeof(value) / sizeof(value[0]));
+    const DWORD length = GetEnvironmentVariableW(name, value, valueCapacity);
+    if (length == 0 || length >= valueCapacity) {
+        return fallback;
+    }
+
+    wchar_t* end = nullptr;
+    const double parsed = wcstod(value, &end);
+    if (end == value || !std::isfinite(parsed)) {
+        besktop::LogWarning(std::wstring(L"invalid ") + name + L"; using " + FormatDouble(fallback, 2));
+        return fallback;
+    }
+
+    return std::clamp(parsed, minimum, maximum);
+}
+
+UINT GetDpiForWindowCompat(HWND hwnd)
+{
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (user32 != nullptr) {
+        using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+        auto* getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
+            GetProcAddress(user32, "GetDpiForWindow"));
+        if (getDpiForWindow != nullptr) {
+            const UINT dpi = getDpiForWindow(hwnd);
+            if (dpi > 0) {
+                return dpi;
+            }
+        }
+    }
+    HDC screenDc = GetDC(nullptr);
+    const UINT dpi = screenDc != nullptr ? static_cast<UINT>(GetDeviceCaps(screenDc, LOGPIXELSX)) : 96;
+    if (screenDc != nullptr) {
+        ReleaseDC(nullptr, screenDc);
+    }
+    return dpi > 0 ? dpi : 96;
 }
 
 } // namespace
@@ -44,6 +128,10 @@ private:
     void RegisterForceExitHotkey();
     void UnregisterForceExitHotkey();
     void LogSnapshot() const;
+    void ResetFrameStats(ULONGLONG now);
+    void RecordTimerTick(ULONGLONG now);
+    void RecordPaintFrame(ULONGLONG startTick, ULONGLONG endTick);
+    void LogFrameStatsIfDue(ULONGLONG now);
 
     LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -58,6 +146,20 @@ private:
     bool animationTimerStarted_ = false;
     bool forceExitHotkeyRegistered_ = false;
     bool wallpaperDrawLogged_ = false;
+    bool frameStatsEnabled_ = false;
+    bool frameTraceEnabled_ = false;
+    bool firstPaintTraceLogged_ = false;
+    double animationSpeed_ = 1.0;
+    double animationOffsetSeconds_ = 0.0;
+    ULONGLONG frameStatsStartTick_ = 0;
+    ULONGLONG lastTimerTick_ = 0;
+    ULONGLONG totalTimerDeltaMs_ = 0;
+    ULONGLONG maxTimerDeltaMs_ = 0;
+    ULONGLONG totalPaintMs_ = 0;
+    ULONGLONG maxPaintMs_ = 0;
+    unsigned int timerTickCount_ = 0;
+    unsigned int timerDeltaCount_ = 0;
+    unsigned int paintFrameCount_ = 0;
 };
 
 StageWindow::StageWindow(HINSTANCE instance)
@@ -100,6 +202,15 @@ int StageWindow::Run(int showCommand)
 
 bool StageWindow::Create(int showCommand)
 {
+    frameStatsEnabled_ = IsTruthyEnvironmentFlag(L"BESKTOP_FRAME_STATS");
+    frameTraceEnabled_ = IsTruthyEnvironmentFlag(L"BESKTOP_FRAME_TRACE");
+    animationSpeed_ = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_SPEED", 1.0, 0.05, 8.0);
+    animationOffsetSeconds_ = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_OFFSET", 0.0, 0.0, 3600.0);
+    LogInfo(std::wstring(L"frame stats: ") + (frameStatsEnabled_ ? L"enabled" : L"disabled"));
+    LogInfo(std::wstring(L"frame trace: ") + (frameTraceEnabled_ ? L"enabled" : L"disabled"));
+    LogInfo(L"animation speed: " + FormatDouble(animationSpeed_, 2) + L"x");
+    LogInfo(L"animation offset: " + FormatDouble(animationOffsetSeconds_, 2) + L"s");
+
     snapshot_ = CaptureDesktopSnapshot();
     LogSnapshot();
 
@@ -147,12 +258,19 @@ bool StageWindow::Create(int showCommand)
     }
 
     RegisterForceExitHotkey();
-    scene_.Reset(snapshot_, RECT{0, 0, width, height});
-
+    SetWindowPos(hwnd_, HWND_TOPMOST, bounds.left, bounds.top, width, height, SWP_NOACTIVATE);
+    RECT windowRect{};
+    RECT clientRect{};
+    GetWindowRect(hwnd_, &windowRect);
+    GetClientRect(hwnd_, &clientRect);
+    LogInfo(L"stage window dpi: " + std::to_wstring(GetDpiForWindowCompat(hwnd_)));
+    LogInfo(L"stage window rect: " + FormatRect(windowRect));
+    LogInfo(L"stage client rect: " + FormatRect(clientRect));
+    scene_.Reset(snapshot_, clientRect);
     ShowWindow(hwnd_, showCommand == 0 ? SW_SHOW : showCommand);
-    SetWindowPos(hwnd_, HWND_TOPMOST, bounds.left, bounds.top, width, height, SWP_SHOWWINDOW);
     SetFocus(hwnd_);
     animationStartTick_ = GetTickCount64();
+    ResetFrameStats(animationStartTick_);
     animationTimerStarted_ = SetTimer(hwnd_, kAnimationTimerId, kAnimationFrameMs, nullptr) != 0;
     if (animationTimerStarted_) {
         LogInfo(L"animation timer started: " + std::to_wstring(kAnimationFrameMs) + L"ms");
@@ -174,6 +292,12 @@ void StageWindow::Close()
 
 void StageWindow::Paint()
 {
+    const ULONGLONG paintStartTick = GetTickCount64();
+    const bool traceFirstPaint = frameTraceEnabled_ && !firstPaintTraceLogged_;
+    if (traceFirstPaint) {
+        firstPaintTraceLogged_ = true;
+        LogInfo(L"paint trace: begin first paint");
+    }
     PAINTSTRUCT paint{};
     HDC paintHdc = BeginPaint(hwnd_, &paint);
 
@@ -194,11 +318,20 @@ void StageWindow::Paint()
         previousBitmap = SelectObject(bufferHdc, bufferBitmap);
         renderHdc = bufferHdc;
     }
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: double buffer ready");
+    }
 
     HBRUSH backgroundBrush = CreateSolidBrush(RGB(10, 12, 16));
     FillRect(renderHdc, &clientRect, backgroundBrush);
     DeleteObject(backgroundBrush);
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: background filled");
+    }
     const bool wallpaperDrawn = wallpaperRenderer_.Draw(renderHdc, clientRect, snapshot_.wallpaper);
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: wallpaper draw returned");
+    }
     if (!wallpaperDrawLogged_) {
         wallpaperDrawLogged_ = true;
         if (wallpaperDrawn) {
@@ -209,9 +342,15 @@ void StageWindow::Paint()
     }
 
     scene_.Render(renderHdc, clientRect);
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: scene rendered");
+    }
 
     if (renderHdc == bufferHdc) {
         BitBlt(paintHdc, 0, 0, width, height, bufferHdc, 0, 0, SRCCOPY);
+    }
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: buffer copied");
     }
     if (previousBitmap != nullptr) {
         SelectObject(bufferHdc, previousBitmap);
@@ -224,6 +363,7 @@ void StageWindow::Paint()
     }
 
     EndPaint(hwnd_, &paint);
+    RecordPaintFrame(paintStartTick, GetTickCount64());
 }
 
 void StageWindow::RegisterForceExitHotkey()
@@ -249,15 +389,165 @@ void StageWindow::UnregisterForceExitHotkey()
 void StageWindow::LogSnapshot() const
 {
     LogInfo(L"snapshot captured");
-    LogInfo(L"monitor: " + FormatMonitorSize(snapshot_.monitorBounds));
+    LogInfo(L"monitor: " + FormatRect(snapshot_.monitorBounds));
     LogInfo(
         L"wallpaper path: " +
         (snapshot_.wallpaper.path.empty() ? std::wstring(L"<fallback>") : snapshot_.wallpaper.path));
     LogInfo(L"wallpaper layout: " + ToDisplayString(snapshot_.wallpaper.layout));
     LogInfo(L"desktop icons: " + std::to_wstring(snapshot_.icons.size()));
+    LogInfo(
+        L"desktop image list icon size: " +
+        std::to_wstring(snapshot_.iconDisplay.imageListIconSize.cx) +
+        L" x " +
+        std::to_wstring(snapshot_.iconDisplay.imageListIconSize.cy) +
+        L" (" +
+        snapshot_.iconDisplay.source +
+        (snapshot_.iconDisplay.usedFallback ? L", fallback" : L"") +
+        L")");
+    size_t iconImageSourceCount = 0;
+    for (const DesktopIconSnapshot& icon : snapshot_.icons) {
+        if (!icon.image.usedFallback && !icon.image.sourcePath.empty()) {
+            ++iconImageSourceCount;
+        }
+    }
+    LogInfo(
+        L"desktop icon image sources: " +
+        std::to_wstring(iconImageSourceCount) +
+        L" / " +
+        std::to_wstring(snapshot_.icons.size()));
+    size_t iconBoundsCount = 0;
+    for (const DesktopIconSnapshot& icon : snapshot_.icons) {
+        if (!icon.usedIconBoundsFallback &&
+            icon.iconBounds.right > icon.iconBounds.left &&
+            icon.iconBounds.bottom > icon.iconBounds.top) {
+            ++iconBoundsCount;
+        }
+    }
+    LogInfo(
+        L"desktop icon bounds: " +
+        std::to_wstring(iconBoundsCount) +
+        L" / " +
+        std::to_wstring(snapshot_.icons.size()));
+    size_t sampleIndex = 0;
+    for (const DesktopIconSnapshot& icon : snapshot_.icons) {
+        const int iconWidth = icon.iconBounds.right - icon.iconBounds.left;
+        const int iconHeight = icon.iconBounds.bottom - icon.iconBounds.top;
+        if (sampleIndex < 5) {
+            LogInfo(
+                L"snapshot icon geometry sample: " +
+                icon.displayName +
+                L"; listview position: " +
+                std::to_wstring(icon.listViewPosition.x) +
+                L"," +
+                std::to_wstring(icon.listViewPosition.y) +
+                L"; LVIR_ICON: " +
+                FormatRect(icon.iconBounds));
+        }
+        LogInfo(
+            L"snapshot icon bounds: " +
+            icon.displayName +
+            L" -> " +
+            std::to_wstring(iconWidth) +
+            L" x " +
+            std::to_wstring(iconHeight) +
+            (icon.usedIconBoundsFallback ? L" (fallback)" : L" (LVIR_ICON)"));
+        if (!icon.image.usedFallback && !icon.image.sourcePath.empty()) {
+            LogInfo(L"snapshot icon image source: " + icon.displayName + L" -> " + icon.image.sourcePath);
+        } else {
+            const std::wstring reason =
+                icon.image.warning.empty() ? std::wstring(L"no source path") : icon.image.warning;
+            LogWarning(L"snapshot icon image fallback: " + icon.displayName + L" (" + reason + L")");
+        }
+        ++sampleIndex;
+    }
     for (const std::wstring& warning : snapshot_.warnings) {
         LogWarning(L"snapshot warning: " + warning);
     }
+}
+
+void StageWindow::ResetFrameStats(ULONGLONG now)
+{
+    frameStatsStartTick_ = now;
+    lastTimerTick_ = 0;
+    totalTimerDeltaMs_ = 0;
+    maxTimerDeltaMs_ = 0;
+    totalPaintMs_ = 0;
+    maxPaintMs_ = 0;
+    timerTickCount_ = 0;
+    timerDeltaCount_ = 0;
+    paintFrameCount_ = 0;
+}
+
+void StageWindow::RecordTimerTick(ULONGLONG now)
+{
+    if (!frameStatsEnabled_) {
+        return;
+    }
+
+    ++timerTickCount_;
+    if (lastTimerTick_ != 0) {
+        const ULONGLONG deltaMs = now - lastTimerTick_;
+        totalTimerDeltaMs_ += deltaMs;
+        maxTimerDeltaMs_ = std::max(maxTimerDeltaMs_, deltaMs);
+        ++timerDeltaCount_;
+    }
+    lastTimerTick_ = now;
+}
+
+void StageWindow::RecordPaintFrame(ULONGLONG startTick, ULONGLONG endTick)
+{
+    if (!frameStatsEnabled_) {
+        return;
+    }
+
+    ++paintFrameCount_;
+    const ULONGLONG durationMs = endTick >= startTick ? endTick - startTick : 0;
+    totalPaintMs_ += durationMs;
+    maxPaintMs_ = std::max(maxPaintMs_, durationMs);
+    LogFrameStatsIfDue(endTick);
+}
+
+void StageWindow::LogFrameStatsIfDue(ULONGLONG now)
+{
+    if (!frameStatsEnabled_) {
+        return;
+    }
+
+    constexpr ULONGLONG kLogIntervalMs = 1000;
+    const ULONGLONG elapsedMs = now >= frameStatsStartTick_ ? now - frameStatsStartTick_ : 0;
+    if (elapsedMs < kLogIntervalMs) {
+        return;
+    }
+
+    const double elapsedSeconds = static_cast<double>(elapsedMs) / 1000.0;
+    const double paintFps = elapsedSeconds > 0.0 ?
+        static_cast<double>(paintFrameCount_) / elapsedSeconds :
+        0.0;
+    const double timerFps = elapsedSeconds > 0.0 ?
+        static_cast<double>(timerTickCount_) / elapsedSeconds :
+        0.0;
+    const double avgTimerMs = timerDeltaCount_ > 0 ?
+        static_cast<double>(totalTimerDeltaMs_) / static_cast<double>(timerDeltaCount_) :
+        0.0;
+    const double avgPaintMs = paintFrameCount_ > 0 ?
+        static_cast<double>(totalPaintMs_) / static_cast<double>(paintFrameCount_) :
+        0.0;
+
+    LogInfo(
+        L"frame stats: paint fps=" +
+        FormatDouble(paintFps, 1) +
+        L"; timer fps=" +
+        FormatDouble(timerFps, 1) +
+        L"; timer avg/max ms=" +
+        FormatDouble(avgTimerMs, 1) +
+        L"/" +
+        std::to_wstring(maxTimerDeltaMs_) +
+        L"; paint avg/max ms=" +
+        FormatDouble(avgPaintMs, 1) +
+        L"/" +
+        std::to_wstring(maxPaintMs_));
+
+    ResetFrameStats(now);
 }
 
 LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
@@ -281,7 +571,9 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_TIMER:
         if (wParam == kAnimationTimerId) {
             const ULONGLONG now = GetTickCount64();
-            elapsedSeconds_ = static_cast<double>(now - animationStartTick_) / 1000.0;
+            RecordTimerTick(now);
+            elapsedSeconds_ = animationOffsetSeconds_ +
+                ((static_cast<double>(now - animationStartTick_) / 1000.0) * animationSpeed_);
             scene_.Update(elapsedSeconds_);
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;

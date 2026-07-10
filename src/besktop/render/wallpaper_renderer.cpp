@@ -29,6 +29,30 @@ bool FileExists(const std::wstring& path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
+bool IsTruthyEnvironmentFlag(const wchar_t* name)
+{
+    wchar_t value[16]{};
+    constexpr auto valueCapacity = static_cast<DWORD>(sizeof(value) / sizeof(value[0]));
+    const DWORD length = GetEnvironmentVariableW(name, value, valueCapacity);
+    if (length == 0 || length >= valueCapacity) {
+        return false;
+    }
+
+    return value[0] == L'1' ||
+        value[0] == L't' ||
+        value[0] == L'T' ||
+        value[0] == L'y' ||
+        value[0] == L'Y' ||
+        value[0] == L'o' ||
+        value[0] == L'O';
+}
+
+bool FrameTraceEnabled()
+{
+    static const bool enabled = IsTruthyEnvironmentFlag(L"BESKTOP_FRAME_TRACE");
+    return enabled;
+}
+
 Gdiplus::RectF ToRectF(const RECT& rect)
 {
     return Gdiplus::RectF(
@@ -95,6 +119,8 @@ WallpaperRenderer::WallpaperRenderer()
 
 WallpaperRenderer::~WallpaperRenderer()
 {
+    ResetRenderedBitmap();
+    ResetCachedImage();
     if (gdiplusReady_) {
         Gdiplus::GdiplusShutdown(gdiplusToken_);
         gdiplusToken_ = 0;
@@ -103,44 +129,197 @@ WallpaperRenderer::~WallpaperRenderer()
     }
 }
 
-bool WallpaperRenderer::Draw(HDC hdc, const RECT& target, const WallpaperSnapshot& wallpaper)
+void WallpaperRenderer::ResetCachedImage()
 {
-    if (!gdiplusReady_ || hdc == nullptr || RectWidth(target) <= 0 || RectHeight(target) <= 0) {
+    cachedImage_.reset();
+    cachedWallpaperPath_.clear();
+}
+
+void WallpaperRenderer::ResetRenderedBitmap()
+{
+    if (cachedRenderedBitmap_ != nullptr) {
+        DeleteObject(cachedRenderedBitmap_);
+        cachedRenderedBitmap_ = nullptr;
+    }
+    cachedRenderedSize_ = {};
+    cachedRenderedWallpaperLayout_ = WallpaperLayout::Unknown;
+}
+
+bool WallpaperRenderer::EnsureImageLoaded(const WallpaperSnapshot& wallpaper)
+{
+    if (!gdiplusReady_) {
         return false;
     }
     if (!FileExists(wallpaper.path)) {
         return false;
     }
+    if (cachedImage_ != nullptr && cachedWallpaperPath_ == wallpaper.path) {
+        return true;
+    }
 
-    Gdiplus::Image image(wallpaper.path.c_str());
-    if (image.GetLastStatus() != Gdiplus::Ok || image.GetWidth() == 0 || image.GetHeight() == 0) {
+    ResetRenderedBitmap();
+    auto image = std::make_unique<Gdiplus::Image>(wallpaper.path.c_str());
+    if (image->GetLastStatus() != Gdiplus::Ok || image->GetWidth() == 0 || image->GetHeight() == 0) {
+        ResetCachedImage();
         return false;
     }
 
-    Gdiplus::Graphics graphics(hdc);
-    if (graphics.GetLastStatus() != Gdiplus::Ok) {
+    cachedImage_ = std::move(image);
+    cachedWallpaperPath_ = wallpaper.path;
+    LogInfo(
+        L"wallpaper image cached: " +
+        std::to_wstring(cachedImage_->GetWidth()) +
+        L" x " +
+        std::to_wstring(cachedImage_->GetHeight()));
+    return true;
+}
+
+bool WallpaperRenderer::EnsureRenderedBitmap(HDC hdc, const RECT& target, const WallpaperSnapshot& wallpaper)
+{
+    if (!gdiplusReady_ || hdc == nullptr || RectWidth(target) <= 0 || RectHeight(target) <= 0) {
+        return false;
+    }
+    if (!EnsureImageLoaded(wallpaper)) {
         return false;
     }
 
-    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
-
-    const Gdiplus::RectF targetRect = ToRectF(target);
-    Gdiplus::GraphicsState state = graphics.Save();
-    graphics.SetClip(targetRect);
+    const int width = RectWidth(target);
+    const int height = RectHeight(target);
+    if (cachedRenderedBitmap_ != nullptr &&
+        cachedRenderedSize_.cx == width &&
+        cachedRenderedSize_.cy == height &&
+        cachedWallpaperPath_ == wallpaper.path &&
+        cachedRenderedWallpaperLayout_ == wallpaper.layout) {
+        return true;
+    }
 
     Gdiplus::Status drawStatus = Gdiplus::GenericError;
-    if (wallpaper.layout == WallpaperLayout::Tile) {
-        Gdiplus::TextureBrush brush(&image, Gdiplus::WrapModeTile);
-        drawStatus = graphics.FillRectangle(&brush, targetRect);
-    } else {
-        const Gdiplus::RectF imageRect =
-            CalculateImageRect(target, image.GetWidth(), image.GetHeight(), wallpaper.layout);
-        drawStatus = graphics.DrawImage(&image, imageRect);
+    {
+        const bool trace = FrameTraceEnabled();
+        if (trace) {
+            LogInfo(L"wallpaper cache trace: creating graphics");
+        }
+        Gdiplus::Graphics graphics(hdc);
+        if (graphics.GetLastStatus() != Gdiplus::Ok) {
+            return false;
+        }
+
+        graphics.SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
+        graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+        if (trace) {
+            LogInfo(L"wallpaper cache trace: graphics configured");
+        }
+
+        const Gdiplus::RectF targetRect = ToRectF(target);
+        Gdiplus::GraphicsState state = graphics.Save();
+        graphics.SetClip(targetRect);
+
+        if (wallpaper.layout == WallpaperLayout::Tile) {
+            if (trace) {
+                LogInfo(L"wallpaper cache trace: drawing tiled wallpaper");
+            }
+            Gdiplus::TextureBrush brush(cachedImage_.get(), Gdiplus::WrapModeTile);
+            drawStatus = graphics.FillRectangle(&brush, targetRect);
+        } else {
+            const Gdiplus::RectF imageRect =
+                CalculateImageRect(target, cachedImage_->GetWidth(), cachedImage_->GetHeight(), wallpaper.layout);
+            if (trace) {
+                LogInfo(L"wallpaper cache trace: drawing scaled wallpaper");
+            }
+            drawStatus = graphics.DrawImage(cachedImage_.get(), imageRect);
+        }
+        graphics.Restore(state);
+    }
+    if (FrameTraceEnabled()) {
+        LogInfo(L"wallpaper cache trace: wallpaper draw call returned");
     }
 
-    graphics.Restore(state);
-    return drawStatus == Gdiplus::Ok;
+    if (drawStatus != Gdiplus::Ok) {
+        return false;
+    }
+
+    if (FrameTraceEnabled()) {
+        LogInfo(L"wallpaper cache trace: creating compatible cache bitmap");
+    }
+    HDC memoryHdc = CreateCompatibleDC(hdc);
+    HBITMAP renderedBitmap = CreateCompatibleBitmap(hdc, width, height);
+    if (memoryHdc == nullptr || renderedBitmap == nullptr) {
+        if (renderedBitmap != nullptr) {
+            DeleteObject(renderedBitmap);
+        }
+        if (memoryHdc != nullptr) {
+            DeleteDC(memoryHdc);
+        }
+        return true;
+    }
+
+    HGDIOBJ previousBitmap = SelectObject(memoryHdc, renderedBitmap);
+    if (FrameTraceEnabled()) {
+        LogInfo(L"wallpaper cache trace: copying rendered wallpaper into cache bitmap");
+    }
+    const BOOL copied = BitBlt(memoryHdc, 0, 0, width, height, hdc, target.left, target.top, SRCCOPY);
+    if (FrameTraceEnabled()) {
+        LogInfo(L"wallpaper cache trace: cache bitmap copy returned");
+    }
+    SelectObject(memoryHdc, previousBitmap);
+    DeleteDC(memoryHdc);
+    if (copied == FALSE) {
+        DeleteObject(renderedBitmap);
+        return true;
+    }
+
+    if (FrameTraceEnabled()) {
+        LogInfo(L"wallpaper cache trace: resetting previous rendered bitmap");
+    }
+    ResetRenderedBitmap();
+    if (FrameTraceEnabled()) {
+        LogInfo(L"wallpaper cache trace: storing rendered bitmap handle");
+    }
+    cachedRenderedBitmap_ = renderedBitmap;
+    cachedRenderedSize_.cx = width;
+    cachedRenderedSize_.cy = height;
+    if (FrameTraceEnabled()) {
+        LogInfo(L"wallpaper cache trace: storing rendered bitmap metadata");
+    }
+    cachedRenderedWallpaperLayout_ = wallpaper.layout;
+    if (FrameTraceEnabled()) {
+        LogInfo(L"wallpaper cache trace: rendered bitmap metadata stored");
+    }
+    LogInfo(
+        L"wallpaper rendered bitmap cached: " +
+        std::to_wstring(width) +
+        L" x " +
+        std::to_wstring(height));
+    return true;
+}
+
+bool WallpaperRenderer::Draw(HDC hdc, const RECT& target, const WallpaperSnapshot& wallpaper)
+{
+    if (!EnsureRenderedBitmap(hdc, target, wallpaper)) {
+        return false;
+    }
+    if (cachedRenderedBitmap_ == nullptr) {
+        return true;
+    }
+
+    HDC memoryHdc = CreateCompatibleDC(hdc);
+    if (memoryHdc == nullptr) {
+        return false;
+    }
+    HGDIOBJ previousBitmap = SelectObject(memoryHdc, cachedRenderedBitmap_);
+    const BOOL copied = BitBlt(
+        hdc,
+        target.left,
+        target.top,
+        RectWidth(target),
+        RectHeight(target),
+        memoryHdc,
+        0,
+        0,
+        SRCCOPY);
+    SelectObject(memoryHdc, previousBitmap);
+    DeleteDC(memoryHdc);
+    return copied != FALSE;
 }
 
 } // namespace besktop

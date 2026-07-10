@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "besktop/desktop/desktop_snapshot.h"
+#include "besktop/render/icon_image_cache.h"
 
 namespace besktop {
 
@@ -30,12 +31,16 @@ public:
         double baseY = 0.0;
         double battleX = 0.0;
         double battleY = 0.0;
-        double width = 58.0;
-        double height = 58.0;
+        double planeWidth = 48.0;
+        double planeHeight = 48.0;
+        bool usedPlaneFallback = true;
+        std::wstring planeSizeSource;
         int role = 0;
         unsigned char red = 80;
         unsigned char green = 140;
         unsigned char blue = 240;
+        const IconImage* iconImage = nullptr;
+        bool usedIconImageFallback = true;
     };
 
 private:
@@ -43,6 +48,7 @@ private:
     void LogPhase(ScenePhase phase);
 
     std::vector<IconActor> actors_;
+    IconImageCache iconImageCache_;
     RECT monitorBounds_{};
     double elapsedSeconds_ = 0.0;
     ScenePhase phase_ = ScenePhase::Calm;
