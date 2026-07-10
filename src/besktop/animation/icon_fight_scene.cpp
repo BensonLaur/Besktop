@@ -170,7 +170,13 @@ void DrawDesktopIconLabel(
     Gdiplus::SolidBrush textBrush(Gdiplus::Color(textAlpha, 255, 255, 255));
 
     constexpr float kOutlineOffset = 1.15f;
-    const Gdiplus::RectF adjustedRect(rect.X, rect.Y - 2.0f, rect.Width, rect.Height + 3.0f);
+    Gdiplus::RectF labelRect = rect;
+    if (text.size() <= 3 && labelRect.Width < 72.0f) {
+        const float centerX = labelRect.X + (labelRect.Width * 0.5f);
+        labelRect.Width = 72.0f;
+        labelRect.X = centerX - (labelRect.Width * 0.5f);
+    }
+    const Gdiplus::RectF adjustedRect(labelRect.X, labelRect.Y - 2.0f, labelRect.Width, labelRect.Height + 3.0f);
     const Gdiplus::RectF outlineRects[] = {
         Gdiplus::RectF(adjustedRect.X - kOutlineOffset, adjustedRect.Y, adjustedRect.Width, adjustedRect.Height),
         Gdiplus::RectF(adjustedRect.X + kOutlineOffset, adjustedRect.Y, adjustedRect.Width, adjustedRect.Height),

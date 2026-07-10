@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <iterator>
 #include <objbase.h>
+#include <exdisp.h>
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <shlobj.h>
@@ -160,6 +161,32 @@ private:
     PWSTR value_ = nullptr;
 };
 
+class ScopedPidl {
+public:
+    explicit ScopedPidl(PITEMID_CHILD value)
+        : value_(value)
+    {
+    }
+
+    ScopedPidl(const ScopedPidl&) = delete;
+    ScopedPidl& operator=(const ScopedPidl&) = delete;
+
+    ~ScopedPidl()
+    {
+        if (value_ != nullptr) {
+            CoTaskMemFree(value_);
+        }
+    }
+
+    PITEMID_CHILD Get() const
+    {
+        return value_;
+    }
+
+private:
+    PITEMID_CHILD value_ = nullptr;
+};
+
 void CapturePrimaryMonitorBounds(besktop::DesktopSnapshot& snapshot)
 {
     const POINT primaryPoint{0, 0};
@@ -271,6 +298,110 @@ std::wstring NormalizePathKey(const std::filesystem::path& path)
     return NormalizeIconKey(error ? path.wstring() : canonical.wstring());
 }
 
+bool IsShortcutLikePath(const std::filesystem::path& path)
+{
+    const std::wstring extension = ToLower(path.extension().wstring());
+    return extension == L".lnk" || extension == L".url";
+}
+
+std::wstring ExpandEnvironmentStringsIfNeeded(const std::wstring& value)
+{
+    if (value.find(L'%') == std::wstring::npos) {
+        return value;
+    }
+
+    const DWORD required = ExpandEnvironmentStringsW(value.c_str(), nullptr, 0);
+    if (required == 0) {
+        return value;
+    }
+
+    std::wstring expanded(required, L'\0');
+    const DWORD written = ExpandEnvironmentStringsW(value.c_str(), expanded.data(), required);
+    if (written == 0 || written > required) {
+        return value;
+    }
+    if (!expanded.empty() && expanded.back() == L'\0') {
+        expanded.pop_back();
+    }
+    return expanded;
+}
+
+bool PathExists(const std::wstring& path)
+{
+    std::error_code error;
+    return !path.empty() && std::filesystem::exists(std::filesystem::path(path), error);
+}
+
+std::wstring ResolveShortcutTargetPath(const std::filesystem::path& shortcutPath)
+{
+    if (!IsShortcutLikePath(shortcutPath)) {
+        return {};
+    }
+
+    ScopedComInitializer com;
+    if (!com.IsUsable()) {
+        return {};
+    }
+
+    ComPtr<IShellLinkW> shellLink;
+    HRESULT result = CoCreateInstance(
+        CLSID_ShellLink,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(shellLink.GetAddressOf()));
+    if (FAILED(result) || shellLink == nullptr) {
+        return {};
+    }
+
+    ComPtr<IPersistFile> persistFile;
+    result = shellLink.As(&persistFile);
+    if (FAILED(result) || persistFile == nullptr ||
+        FAILED(persistFile->Load(shortcutPath.c_str(), STGM_READ))) {
+        return {};
+    }
+
+    wchar_t targetPath[MAX_PATH]{};
+    WIN32_FIND_DATAW findData{};
+    result = shellLink->GetPath(targetPath, static_cast<int>(std::size(targetPath)), &findData, SLGP_UNCPRIORITY);
+    if (FAILED(result) || targetPath[0] == L'\0') {
+        return {};
+    }
+
+    std::wstring expanded = ExpandEnvironmentStringsIfNeeded(targetPath);
+    return PathExists(expanded) ? expanded : std::wstring{};
+}
+
+int ScoreDesktopIconSource(const std::filesystem::path& sourcePath)
+{
+    const std::wstring extension = ToLower(sourcePath.extension().wstring());
+    if (extension == L".lnk") {
+        const std::wstring targetPath = ResolveShortcutTargetPath(sourcePath);
+        const std::filesystem::path target(targetPath);
+        const std::wstring targetExtension = ToLower(target.extension().wstring());
+        std::error_code error;
+        if (targetExtension == L".exe") {
+            return 500;
+        }
+        if (std::filesystem::is_regular_file(target, error)) {
+            return 420;
+        }
+        if (std::filesystem::is_directory(target, error)) {
+            return 260;
+        }
+        return 220;
+    }
+    if (extension == L".exe") {
+        return 480;
+    }
+    if (extension == L".ico") {
+        return 440;
+    }
+    if (extension == L".url") {
+        return 210;
+    }
+    return 300;
+}
+
 std::wstring ShellDisplayNameForPath(const std::filesystem::path& path)
 {
     SHFILEINFOW fileInfo{};
@@ -286,8 +417,13 @@ std::wstring ShellDisplayNameForPath(const std::filesystem::path& path)
     return {};
 }
 
+struct DesktopIconSourceCandidate {
+    std::wstring path;
+    int score = 0;
+};
+
 struct DesktopIconSourceIndex {
-    std::unordered_map<std::wstring, std::wstring> pathByName;
+    std::unordered_map<std::wstring, DesktopIconSourceCandidate> pathByName;
     std::vector<std::wstring> warnings;
 };
 
@@ -338,16 +474,32 @@ void AddOneDriveDesktopFolders(std::vector<std::filesystem::path>& folders)
 }
 
 void AddSourceKey(
-    std::unordered_map<std::wstring, std::wstring>& pathByName,
+    std::unordered_map<std::wstring, DesktopIconSourceCandidate>& pathByName,
     const std::wstring& key,
-    const std::filesystem::path& sourcePath)
+    const std::filesystem::path& sourcePath,
+    int score)
 {
     const std::wstring normalized = NormalizeIconKey(key);
     if (normalized.empty()) {
         return;
     }
 
-    pathByName.try_emplace(normalized, sourcePath.wstring());
+    auto [it, inserted] = pathByName.try_emplace(
+        normalized,
+        DesktopIconSourceCandidate{sourcePath.wstring(), score});
+    if (!inserted && score > it->second.score) {
+        besktop::LogInfo(
+            L"desktop icon source duplicate replaced: " +
+            key +
+            L" -> " +
+            sourcePath.wstring() +
+            L" (score " +
+            std::to_wstring(score) +
+            L" > " +
+            std::to_wstring(it->second.score) +
+            L")");
+        it->second = DesktopIconSourceCandidate{sourcePath.wstring(), score};
+    }
 }
 
 void AddDesktopFileToIndex(
@@ -359,13 +511,14 @@ void AddDesktopFileToIndex(
     const std::wstring stem = sourcePath.stem().wstring();
     const std::wstring extension = ToLower(sourcePath.extension().wstring());
     const std::wstring shellDisplayName = ShellDisplayNameForPath(sourcePath);
+    const int sourceScore = ScoreDesktopIconSource(sourcePath);
 
-    AddSourceKey(index.pathByName, fileName, sourcePath);
-    AddSourceKey(index.pathByName, stem, sourcePath);
-    AddSourceKey(index.pathByName, shellDisplayName, sourcePath);
+    AddSourceKey(index.pathByName, fileName, sourcePath, sourceScore);
+    AddSourceKey(index.pathByName, stem, sourcePath, sourceScore);
+    AddSourceKey(index.pathByName, shellDisplayName, sourcePath, sourceScore);
 
     if (extension == L".lnk" || extension == L".url") {
-        AddSourceKey(index.pathByName, stem, sourcePath);
+        AddSourceKey(index.pathByName, stem, sourcePath, sourceScore);
     }
 }
 
@@ -417,7 +570,7 @@ besktop::DesktopIconImageSnapshot ResolveDesktopIconImageSource(
         const auto found = index.pathByName.find(NormalizeIconKey(probeName));
         if (found != index.pathByName.end()) {
             besktop::DesktopIconImageSnapshot image;
-            image.sourcePath = found->second;
+            image.sourcePath = found->second.path;
             image.usedFallback = false;
             besktop::LogInfo(L"desktop icon source matched: " + displayName + L" -> " + image.sourcePath);
             return image;
@@ -429,6 +582,176 @@ besktop::DesktopIconImageSnapshot ResolveDesktopIconImageSource(
     image.warning = L"No matching Desktop/Public Desktop file was found.";
     besktop::LogWarning(L"desktop icon source fallback: " + displayName + L" (" + image.warning + L")");
     return image;
+}
+
+std::wstring ShellItemDisplayName(IShellItem* item, SIGDN sigdn)
+{
+    if (item == nullptr) {
+        return {};
+    }
+
+    PWSTR rawName = nullptr;
+    if (FAILED(item->GetDisplayName(sigdn, &rawName)) || rawName == nullptr || rawName[0] == L'\0') {
+        if (rawName != nullptr) {
+            CoTaskMemFree(rawName);
+        }
+        return {};
+    }
+
+    ScopedCoTaskMemString name(rawName);
+    return name.Get();
+}
+
+struct DesktopShellItemSource {
+    besktop::DesktopIconImageSnapshot image;
+    std::wstring displayName;
+};
+
+std::vector<DesktopShellItemSource> CaptureDesktopShellItemSources(int expectedItemCount)
+{
+    std::vector<DesktopShellItemSource> sources(static_cast<size_t>(std::max(expectedItemCount, 0)));
+    if (expectedItemCount <= 0) {
+        return sources;
+    }
+
+    ScopedComInitializer com;
+    if (!com.IsUsable()) {
+        besktop::LogWarning(L"desktop shell view COM initialization failed: " + FormatHResult(com.Result()));
+        return sources;
+    }
+
+    ComPtr<IShellWindows> shellWindows;
+    HRESULT result = CoCreateInstance(
+        CLSID_ShellWindows,
+        nullptr,
+        CLSCTX_ALL,
+        IID_IShellWindows,
+        reinterpret_cast<void**>(shellWindows.GetAddressOf()));
+    if (FAILED(result) || shellWindows == nullptr) {
+        besktop::LogWarning(L"desktop ShellWindows creation failed: " + FormatHResult(result));
+        return sources;
+    }
+
+    VARIANT desktopLocation{};
+    VARIANT emptyVariant{};
+    desktopLocation.vt = VT_I4;
+    desktopLocation.lVal = CSIDL_DESKTOP;
+    long desktopHwnd = 0;
+    ComPtr<IDispatch> dispatch;
+    result = shellWindows->FindWindowSW(
+        &desktopLocation,
+        &emptyVariant,
+        SWC_DESKTOP,
+        &desktopHwnd,
+        SWFO_NEEDDISPATCH,
+        dispatch.GetAddressOf());
+    if (FAILED(result) || dispatch == nullptr) {
+        besktop::LogWarning(L"desktop ShellWindows::FindWindowSW failed: " + FormatHResult(result));
+        return sources;
+    }
+
+    ComPtr<IServiceProvider> serviceProvider;
+    result = dispatch.As(&serviceProvider);
+    if (FAILED(result) || serviceProvider == nullptr) {
+        besktop::LogWarning(L"desktop shell dispatch IServiceProvider query failed: " + FormatHResult(result));
+        return sources;
+    }
+
+    ComPtr<IShellBrowser> shellBrowser;
+    result = serviceProvider->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(shellBrowser.GetAddressOf()));
+    if (FAILED(result) || shellBrowser == nullptr) {
+        besktop::LogWarning(L"desktop shell browser query failed: " + FormatHResult(result));
+        return sources;
+    }
+
+    ComPtr<IShellView> shellView;
+    result = shellBrowser->QueryActiveShellView(shellView.GetAddressOf());
+    if (FAILED(result) || shellView == nullptr) {
+        besktop::LogWarning(L"desktop active shell view query failed: " + FormatHResult(result));
+        return sources;
+    }
+
+    ComPtr<IFolderView> folderView;
+    result = shellView.As(&folderView);
+    if (FAILED(result) || folderView == nullptr) {
+        besktop::LogWarning(L"desktop shell view IFolderView query failed: " + FormatHResult(result));
+        return sources;
+    }
+
+    ComPtr<IShellFolder> shellFolder;
+    result = folderView->GetFolder(IID_PPV_ARGS(shellFolder.GetAddressOf()));
+    if (FAILED(result) || shellFolder == nullptr) {
+        besktop::LogWarning(L"desktop folder view parent folder query failed: " + FormatHResult(result));
+        return sources;
+    }
+
+    int shellItemCount = 0;
+    result = folderView->ItemCount(SVGIO_ALLVIEW, &shellItemCount);
+    if (FAILED(result) || shellItemCount <= 0) {
+        besktop::LogWarning(L"desktop folder view item count failed: " + FormatHResult(result));
+        return sources;
+    }
+
+    const int count = std::min(expectedItemCount, shellItemCount);
+    int resolvedCount = 0;
+    for (int index = 0; index < count; ++index) {
+        PITEMID_CHILD rawChildPidl = nullptr;
+        result = folderView->Item(index, &rawChildPidl);
+        if (FAILED(result) || rawChildPidl == nullptr) {
+            besktop::LogWarning(
+                L"desktop folder view item PIDL failed: #" +
+                std::to_wstring(index) +
+                L" (" +
+                FormatHResult(result) +
+                L")");
+            continue;
+        }
+
+        ScopedPidl childPidl(rawChildPidl);
+        ComPtr<IShellItem> shellItem;
+        result = SHCreateItemWithParent(
+            nullptr,
+            shellFolder.Get(),
+            childPidl.Get(),
+            IID_PPV_ARGS(shellItem.GetAddressOf()));
+        if (FAILED(result) || shellItem == nullptr) {
+            besktop::LogWarning(
+                L"desktop shell item creation failed: #" +
+                std::to_wstring(index) +
+                L" (" +
+                FormatHResult(result) +
+                L")");
+            continue;
+        }
+
+        std::wstring itemPath = ShellItemDisplayName(shellItem.Get(), SIGDN_FILESYSPATH);
+        if (itemPath.empty()) {
+            itemPath = ShellItemDisplayName(shellItem.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
+        }
+        if (!PathExists(itemPath)) {
+            besktop::LogWarning(
+                L"desktop shell item source path unavailable: #" +
+                std::to_wstring(index + 1) +
+                L" (" +
+                itemPath +
+                L")");
+            continue;
+        }
+
+        DesktopShellItemSource source;
+        source.image.sourcePath = itemPath;
+        source.image.usedFallback = false;
+        source.displayName = ShellItemDisplayName(shellItem.Get(), SIGDN_NORMALDISPLAY);
+        sources[static_cast<size_t>(index)] = std::move(source);
+        ++resolvedCount;
+    }
+
+    besktop::LogInfo(
+        L"desktop shell item sources resolved: " +
+        std::to_wstring(resolvedCount) +
+        L" / " +
+        std::to_wstring(expectedItemCount));
+    return sources;
 }
 
 bool IsLikelyOnPrimaryMonitor(const RECT& monitorBounds, const POINT& point)
@@ -731,6 +1054,7 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
 
     const int itemCount = static_cast<int>(itemCountResult);
     CaptureDesktopIconDisplayMetrics(snapshot, listView);
+    const std::vector<DesktopShellItemSource> shellItemSources = CaptureDesktopShellItemSources(itemCount);
     const DesktopIconSourceIndex sourceIndex = BuildDesktopIconSourceIndex();
     int capturedCount = 0;
     int imageSourceCount = 0;
@@ -749,7 +1073,23 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
         besktop::DesktopIconSnapshot icon;
         icon.id = L"desktop-listview-icon-" + std::to_wstring(index + 1);
         icon.displayName = ReadDesktopListViewText(listView, explorerProcess, index);
-        icon.image = ResolveDesktopIconImageSource(sourceIndex, icon.displayName);
+        if (index < static_cast<int>(shellItemSources.size()) &&
+            !shellItemSources[static_cast<size_t>(index)].image.usedFallback) {
+            icon.image = shellItemSources[static_cast<size_t>(index)].image;
+            const std::wstring& shellDisplayName = shellItemSources[static_cast<size_t>(index)].displayName;
+            if (!shellDisplayName.empty() &&
+                NormalizeIconKey(shellDisplayName) != NormalizeIconKey(icon.displayName)) {
+                besktop::LogWarning(
+                    L"desktop shell item display mismatch: listview='" +
+                    icon.displayName +
+                    L"', shell='" +
+                    shellDisplayName +
+                    L"'");
+            }
+            besktop::LogInfo(L"desktop icon shell source matched: " + icon.displayName + L" -> " + icon.image.sourcePath);
+        } else {
+            icon.image = ResolveDesktopIconImageSource(sourceIndex, icon.displayName);
+        }
         icon.listViewPosition = position;
         icon.bounds = RECT{
             position.x,
