@@ -48,8 +48,20 @@ struct DesktopIconSnapshot {
     bool usedFallback = true;
 };
 
+struct TaskbarSnapshot {
+    RECT screenBounds{};
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+    std::vector<unsigned char> bgraPixels;
+    bool visible = false;
+    bool captureSucceeded = false;
+};
+
 struct DesktopSnapshot {
     RECT monitorBounds{};
+    RECT workArea{};
+    bool usedWorkAreaFallback = true;
+    TaskbarSnapshot taskbar;
     WallpaperSnapshot wallpaper;
     DesktopIconDisplayMetrics iconDisplay;
     std::vector<DesktopIconSnapshot> icons;

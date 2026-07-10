@@ -5,6 +5,7 @@
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/logging/logger.h"
 #include "besktop/render/wallpaper_renderer.h"
+#include "besktop/render/taskbar_renderer.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -103,12 +104,14 @@ private:
     HWND hwnd_ = nullptr;
     DesktopSnapshot snapshot_;
     WallpaperRenderer wallpaperRenderer_;
+    TaskbarRenderer taskbarRenderer_;
     IconFightScene scene_;
     ULONGLONG animationStartTick_ = 0;
     double elapsedSeconds_ = 0.0;
     bool animationTimerStarted_ = false;
     bool forceExitHotkeyRegistered_ = false;
     bool wallpaperDrawLogged_ = false;
+    bool taskbarDrawLogged_ = false;
     bool firstPaintTraceLogged_ = false;
     ULONGLONG frameStatsStartTick_ = 0;
     ULONGLONG lastTimerTick_ = 0;
@@ -301,6 +304,19 @@ void StageWindow::Paint()
         }
     }
 
+    const bool taskbarDrawn = taskbarRenderer_.Draw(renderHdc, clientRect, snapshot_);
+    if (!taskbarDrawLogged_) {
+        taskbarDrawLogged_ = true;
+        if (taskbarDrawn) {
+            LogInfo(L"static taskbar draw succeeded");
+        } else if (snapshot_.taskbar.captureSucceeded) {
+            LogWarning(L"static taskbar draw unavailable; continuing without taskbar pixels");
+        }
+    }
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: taskbar rendered");
+    }
+
     scene_.Render(renderHdc, clientRect);
     if (traceFirstPaint) {
         LogInfo(L"paint trace: scene rendered");
@@ -350,6 +366,10 @@ void StageWindow::LogSnapshot() const
 {
     LogInfo(L"snapshot captured");
     LogInfo(L"monitor: " + FormatRect(snapshot_.monitorBounds));
+    LogInfo(L"work area: " + FormatRect(snapshot_.workArea));
+    LogInfo(std::wstring(L"taskbar detected: ") + (snapshot_.taskbar.visible ? L"yes" : L"no"));
+    LogInfo(std::wstring(L"taskbar pixels captured: ") +
+        (snapshot_.taskbar.captureSucceeded ? L"yes" : L"no"));
     LogInfo(
         L"wallpaper path: " +
         (snapshot_.wallpaper.path.empty() ? std::wstring(L"<fallback>") : snapshot_.wallpaper.path));

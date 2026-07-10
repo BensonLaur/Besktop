@@ -41,6 +41,7 @@ add_executable(besktop WIN32
     src/besktop/desktop/desktop_snapshot.cpp
     src/besktop/logging/logger.cpp
     src/besktop/render/icon_image_cache.cpp
+    src/besktop/render/taskbar_renderer.cpp
     src/besktop/render/wallpaper_renderer.cpp
     src/main.cpp
     "${BESKTOP_GENERATED_RESOURCE_FILE}"

@@ -66,6 +66,8 @@ private:
     IconImageCache iconImageCache_;
     RECT monitorBounds_{};
     RECT clientBounds_{};
+    RECT wanderBounds_{};
+    bool usingCapturedWorkArea_ = false;
     double elapsedSeconds_ = 0.0;
     double previousElapsedSeconds_ = 0.0;
     ScenePhase phase_ = ScenePhase::Sleeping;

@@ -196,6 +196,8 @@ void CapturePrimaryMonitorBounds(besktop::DesktopSnapshot& snapshot)
     monitorInfo.cbSize = sizeof(monitorInfo);
     if (primaryMonitor != nullptr && GetMonitorInfoW(primaryMonitor, &monitorInfo)) {
         snapshot.monitorBounds = monitorInfo.rcMonitor;
+        snapshot.workArea = monitorInfo.rcWork;
+        snapshot.usedWorkAreaFallback = false;
         besktop::LogInfo(
             L"primary monitor captured: " +
             std::to_wstring(monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left) +
@@ -205,8 +207,110 @@ void CapturePrimaryMonitorBounds(besktop::DesktopSnapshot& snapshot)
     }
 
     snapshot.monitorBounds = RECT{0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    snapshot.workArea = snapshot.monitorBounds;
     snapshot.warnings.push_back(L"Primary monitor rcMonitor unavailable; using screen metrics fallback.");
     besktop::LogWarning(L"primary monitor fallback used");
+}
+
+bool IsValidTaskbarRect(const RECT& rect, const RECT& monitor)
+{
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const int monitorWidth = monitor.right - monitor.left;
+    const int monitorHeight = monitor.bottom - monitor.top;
+    if (width <= 0 || height <= 0 || monitorWidth <= 0 || monitorHeight <= 0) {
+        return false;
+    }
+    const bool touchesEdge = rect.left == monitor.left || rect.top == monitor.top ||
+        rect.right == monitor.right || rect.bottom == monitor.bottom;
+    return touchesEdge &&
+        static_cast<long long>(width) * height <=
+            static_cast<long long>(monitorWidth) * monitorHeight * 2 / 5;
+}
+
+bool CaptureScreenPixels(const RECT& bounds, besktop::TaskbarSnapshot& taskbar)
+{
+    const int width = bounds.right - bounds.left;
+    const int height = bounds.bottom - bounds.top;
+    HDC screenDc = GetDC(nullptr);
+    HDC memoryDc = screenDc != nullptr ? CreateCompatibleDC(screenDc) : nullptr;
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void* pixels = nullptr;
+    HBITMAP bitmap = screenDc != nullptr ?
+        CreateDIBSection(screenDc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0) : nullptr;
+    bool succeeded = false;
+    HGDIOBJ previous = nullptr;
+    if (memoryDc != nullptr && bitmap != nullptr && pixels != nullptr) {
+        previous = SelectObject(memoryDc, bitmap);
+        if (previous != nullptr && previous != HGDI_ERROR) {
+            succeeded = BitBlt(
+                memoryDc, 0, 0, width, height, screenDc, bounds.left, bounds.top,
+                SRCCOPY | CAPTUREBLT) != FALSE;
+        }
+        if (succeeded) {
+            const auto* begin = static_cast<const unsigned char*>(pixels);
+            taskbar.bgraPixels.assign(begin, begin + static_cast<size_t>(width) * height * 4);
+            taskbar.pixelWidth = width;
+            taskbar.pixelHeight = height;
+        }
+    }
+    if (previous != nullptr && previous != HGDI_ERROR) {
+        SelectObject(memoryDc, previous);
+    }
+    if (bitmap != nullptr) {
+        DeleteObject(bitmap);
+    }
+    if (memoryDc != nullptr) {
+        DeleteDC(memoryDc);
+    }
+    if (screenDc != nullptr) {
+        ReleaseDC(nullptr, screenDc);
+    }
+    return succeeded;
+}
+
+void CaptureTaskbarSnapshot(besktop::DesktopSnapshot& snapshot)
+{
+    HWND taskbarWindow = FindWindowW(L"Shell_TrayWnd", nullptr);
+    RECT candidate{};
+    bool hasCandidate = taskbarWindow != nullptr && IsWindowVisible(taskbarWindow) &&
+        GetWindowRect(taskbarWindow, &candidate) != FALSE;
+
+    if (!hasCandidate) {
+        APPBARDATA appbar{};
+        appbar.cbSize = sizeof(appbar);
+        if (SHAppBarMessage(ABM_GETTASKBARPOS, &appbar) != 0) {
+            candidate = appbar.rc;
+            hasCandidate = true;
+        }
+    }
+
+    RECT clipped{};
+    if (!hasCandidate || !IntersectRect(&clipped, &candidate, &snapshot.monitorBounds) ||
+        !IsValidTaskbarRect(clipped, snapshot.monitorBounds)) {
+        snapshot.warnings.push_back(L"Visible primary taskbar was not detected; using the monitor work area only.");
+        besktop::LogWarning(L"visible primary taskbar not detected; static taskbar rendering disabled");
+        return;
+    }
+
+    snapshot.taskbar.visible = true;
+    snapshot.taskbar.screenBounds = clipped;
+    snapshot.taskbar.captureSucceeded = CaptureScreenPixels(clipped, snapshot.taskbar);
+    if (!snapshot.taskbar.captureSucceeded) {
+        snapshot.taskbar.bgraPixels.clear();
+        snapshot.taskbar.pixelWidth = 0;
+        snapshot.taskbar.pixelHeight = 0;
+        snapshot.warnings.push_back(L"Static taskbar capture failed; the stage will continue without taskbar pixels.");
+        besktop::LogWarning(L"static taskbar capture failed; rendering disabled");
+    } else {
+        besktop::LogInfo(L"static primary taskbar captured: " + FormatRect(clipped));
+    }
 }
 
 void CaptureWallpaperSnapshot(besktop::DesktopSnapshot& snapshot)
@@ -1227,6 +1331,7 @@ DesktopSnapshot CaptureDesktopSnapshot()
 {
     DesktopSnapshot snapshot;
     CapturePrimaryMonitorBounds(snapshot);
+    CaptureTaskbarSnapshot(snapshot);
     CaptureWallpaperSnapshot(snapshot);
     if (!CaptureDesktopIconsFromListView(snapshot)) {
         AddDemoIconFallbacks(snapshot);

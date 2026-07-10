@@ -1066,6 +1066,8 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     iconImageCache_.Clear();
     monitorBounds_ = snapshot.monitorBounds;
     clientBounds_ = clientRect;
+    wanderBounds_ = clientRect;
+    usingCapturedWorkArea_ = false;
     elapsedSeconds_ = 0.0;
     previousElapsedSeconds_ = 0.0;
     phase_ = ScenePhase::Sleeping;
@@ -1103,6 +1105,18 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
             static_cast<LONG>((rect.bottom - snapshot.monitorBounds.top) * scaleY),
         };
     };
+    if (!snapshot.usedWorkAreaFallback &&
+        snapshot.workArea.right > snapshot.workArea.left &&
+        snapshot.workArea.bottom > snapshot.workArea.top) {
+        RECT mappedWorkArea = scaleDesktopRect(snapshot.workArea);
+        RECT clippedWorkArea{};
+        if (IntersectRect(&clippedWorkArea, &mappedWorkArea, &clientBounds_) &&
+            clippedWorkArea.right > clippedWorkArea.left &&
+            clippedWorkArea.bottom > clippedWorkArea.top) {
+            wanderBounds_ = clippedWorkArea;
+            usingCapturedWorkArea_ = true;
+        }
+    }
 
     const size_t count = snapshot.icons.size();
     const double staggerStep = count > 1 ? std::clamp(2.4 / static_cast<double>(count - 1), 0.05, 0.12) : 0.0;
@@ -1266,19 +1280,20 @@ void IconFightScene::ChooseWanderTarget(IconActor& actor)
     const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
     const double sideMargin = std::max(24.0, planeSide * 1.15);
     const double topMargin = std::max(24.0, planeSide * 0.80);
-    // TODO: replace this concentrated DPI-scaled safety margin with a captured taskbar rectangle.
-    const double taskbarSafety = std::max(64.0, planeSide * 1.75);
-    const double minX = clientBounds_.left + sideMargin;
-    const double maxX = clientBounds_.right - sideMargin;
-    const double minY = clientBounds_.top + topMargin;
-    const double maxY = clientBounds_.bottom - taskbarSafety;
+    const double bottomMargin = usingCapturedWorkArea_ ?
+        std::max(32.0, planeSide * 1.35) :
+        std::max(64.0, planeSide * 1.75);
+    const double minX = wanderBounds_.left + sideMargin;
+    const double maxX = wanderBounds_.right - sideMargin;
+    const double minY = wanderBounds_.top + topMargin;
+    const double maxY = wanderBounds_.bottom - bottomMargin;
 
     const auto nextUnit = [&actor]() {
         actor.randomState = actor.randomState * 1664525u + 1013904223u;
         return static_cast<double>(actor.randomState & 0x00FFFFFFu) / 16777215.0;
     };
-    actor.targetX = maxX > minX ? minX + (maxX - minX) * nextUnit() : (clientBounds_.left + clientBounds_.right) * 0.5;
-    actor.targetY = maxY > minY ? minY + (maxY - minY) * nextUnit() : (clientBounds_.top + clientBounds_.bottom) * 0.5;
+    actor.targetX = maxX > minX ? minX + (maxX - minX) * nextUnit() : (wanderBounds_.left + wanderBounds_.right) * 0.5;
+    actor.targetY = maxY > minY ? minY + (maxY - minY) * nextUnit() : (wanderBounds_.top + wanderBounds_.bottom) * 0.5;
 }
 
 void IconFightScene::Render(HDC hdc, const RECT& clientRect) const
