@@ -5,6 +5,21 @@
 
 Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一个安全的全屏舞台，让全部桌面图标像小角色一样错峰醒来、长出白色手脚并自由闲逛。打架动作将在后续版本加入。
 
+## 运行效果
+
+<table>
+  <tr>
+    <th width="50%">启动前：原始桌面</th>
+    <th width="50%">启动后：图标全部醒来</th>
+  </tr>
+  <tr>
+    <td><img src="docs/images/desktop-before.webp" alt="运行 Besktop 前的原始 Windows 桌面"></td>
+    <td><img src="docs/images/desktop-awakened.webp" alt="运行 Besktop 后桌面图标长出手脚并自由漫游"></td>
+  </tr>
+</table>
+
+所有动画都发生在 Besktop 重建的全屏舞台中；退出后，真实桌面仍保持原样。
+
 目标很简单：录屏 5 秒，朋友看完问一句：
 
 ```text
