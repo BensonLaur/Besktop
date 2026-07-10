@@ -4,6 +4,8 @@
 
 namespace besktop {
 
-int RunStageWindow(HINSTANCE instance, int showCommand);
+struct RuntimeOptions;
+
+int RunStageWindow(HINSTANCE instance, int showCommand, const RuntimeOptions& options);
 
 } // namespace besktop

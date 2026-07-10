@@ -1,5 +1,6 @@
 #include "besktop/animation/icon_fight_scene.h"
 
+#include "besktop/app/runtime_options.h"
 #include "besktop/logging/logger.h"
 
 #include <objidl.h>
@@ -51,33 +52,14 @@ double DegreesToRadians(double degrees)
     return degrees * kPi / 180.0;
 }
 
-bool IsTruthyEnvironmentFlag(const wchar_t* name)
-{
-    wchar_t value[16]{};
-    const DWORD length = GetEnvironmentVariableW(name, value, static_cast<DWORD>(std::size(value)));
-    if (length == 0 || length >= std::size(value)) {
-        return false;
-    }
-
-    return value[0] == L'1' ||
-        value[0] == L't' ||
-        value[0] == L'T' ||
-        value[0] == L'y' ||
-        value[0] == L'Y' ||
-        value[0] == L'o' ||
-        value[0] == L'O';
-}
-
 bool RenderShadowsEnabled()
 {
-    static const bool enabled = IsTruthyEnvironmentFlag(L"BESKTOP_RENDER_SHADOWS");
-    return enabled;
+    return besktop::GetRuntimeOptions().renderShadowsEnabled;
 }
 
 bool DebugIconPlaneEnabled()
 {
-    static const bool enabled = IsTruthyEnvironmentFlag(L"BESKTOP_DEBUG_ICON_PLANE");
-    return enabled;
+    return besktop::GetRuntimeOptions().debugIconPlaneEnabled;
 }
 
 double LerpValue(double from, double to, double t);
@@ -1211,7 +1193,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
                 actor.iconImage->extractionMethod +
                 L")");
         } else {
-            LogWarning(L"icon actor image fallback: " + actor.label);
+            LogInfo(L"icon actor image fallback: " + actor.label);
         }
     }
     LogInfo(
@@ -1223,6 +1205,11 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         std::to_wstring(actors_.size() - boundActorCount) +
         L"; extraction failed: " +
         std::to_wstring(iconImageCache_.FailedCount()));
+    if (iconImageCache_.FailedCount() > 0) {
+        LogWarning(
+            L"some icon actor images use fallback bodies; count: " +
+            std::to_wstring(iconImageCache_.FailedCount()));
+    }
     LogInfo(
         L"icon actor label bounds captured: " +
         std::to_wstring(labelBoundsActorCount) +

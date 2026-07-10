@@ -1,14 +1,13 @@
 #include "besktop/app/stage_window.h"
 
 #include "besktop/animation/icon_fight_scene.h"
+#include "besktop/app/runtime_options.h"
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/logging/logger.h"
 #include "besktop/render/wallpaper_renderer.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <string>
 
 namespace {
@@ -49,43 +48,6 @@ std::wstring FormatDouble(double value, int precision = 1)
     return buffer;
 }
 
-bool IsTruthyEnvironmentFlag(const wchar_t* name)
-{
-    wchar_t value[16]{};
-    constexpr auto valueCapacity = static_cast<DWORD>(sizeof(value) / sizeof(value[0]));
-    const DWORD length = GetEnvironmentVariableW(name, value, valueCapacity);
-    if (length == 0 || length >= valueCapacity) {
-        return false;
-    }
-
-    return value[0] == L'1' ||
-        value[0] == L't' ||
-        value[0] == L'T' ||
-        value[0] == L'y' ||
-        value[0] == L'Y' ||
-        value[0] == L'o' ||
-        value[0] == L'O';
-}
-
-double ReadEnvironmentDouble(const wchar_t* name, double fallback, double minimum, double maximum)
-{
-    wchar_t value[64]{};
-    constexpr auto valueCapacity = static_cast<DWORD>(sizeof(value) / sizeof(value[0]));
-    const DWORD length = GetEnvironmentVariableW(name, value, valueCapacity);
-    if (length == 0 || length >= valueCapacity) {
-        return fallback;
-    }
-
-    wchar_t* end = nullptr;
-    const double parsed = wcstod(value, &end);
-    if (end == value || !std::isfinite(parsed)) {
-        besktop::LogWarning(std::wstring(L"invalid ") + name + L"; using " + FormatDouble(fallback, 2));
-        return fallback;
-    }
-
-    return std::clamp(parsed, minimum, maximum);
-}
-
 UINT GetDpiForWindowCompat(HWND hwnd)
 {
     HMODULE user32 = GetModuleHandleW(L"user32.dll");
@@ -114,7 +76,7 @@ namespace besktop {
 
 class StageWindow {
 public:
-    explicit StageWindow(HINSTANCE instance);
+    StageWindow(HINSTANCE instance, const RuntimeOptions& options);
 
     StageWindow(const StageWindow&) = delete;
     StageWindow& operator=(const StageWindow&) = delete;
@@ -137,6 +99,7 @@ private:
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
     HINSTANCE instance_ = nullptr;
+    const RuntimeOptions& options_;
     HWND hwnd_ = nullptr;
     DesktopSnapshot snapshot_;
     WallpaperRenderer wallpaperRenderer_;
@@ -146,11 +109,7 @@ private:
     bool animationTimerStarted_ = false;
     bool forceExitHotkeyRegistered_ = false;
     bool wallpaperDrawLogged_ = false;
-    bool frameStatsEnabled_ = false;
-    bool frameTraceEnabled_ = false;
     bool firstPaintTraceLogged_ = false;
-    double animationSpeed_ = 1.0;
-    double animationOffsetSeconds_ = 0.0;
     ULONGLONG frameStatsStartTick_ = 0;
     ULONGLONG lastTimerTick_ = 0;
     ULONGLONG totalTimerDeltaMs_ = 0;
@@ -162,16 +121,19 @@ private:
     unsigned int paintFrameCount_ = 0;
 };
 
-StageWindow::StageWindow(HINSTANCE instance)
-    : instance_(instance)
+StageWindow::StageWindow(HINSTANCE instance, const RuntimeOptions& options)
+    : instance_(instance),
+      options_(options)
 {
 }
 
-int RunStageWindow(HINSTANCE instance, int showCommand)
+int RunStageWindow(HINSTANCE instance, int showCommand, const RuntimeOptions& options)
 {
     LogInfo(L"app start");
-    LogInfo(L"log file: " + GetLogFilePath());
-    StageWindow stageWindow(instance);
+    if (options.verboseInfoLogging) {
+        LogInfo(L"log file: " + GetLogFilePath());
+    }
+    StageWindow stageWindow(instance, options);
     const int exitCode = stageWindow.Run(showCommand);
     LogInfo(L"app exit code: " + std::to_wstring(exitCode));
     return exitCode;
@@ -202,14 +164,12 @@ int StageWindow::Run(int showCommand)
 
 bool StageWindow::Create(int showCommand)
 {
-    frameStatsEnabled_ = IsTruthyEnvironmentFlag(L"BESKTOP_FRAME_STATS");
-    frameTraceEnabled_ = IsTruthyEnvironmentFlag(L"BESKTOP_FRAME_TRACE");
-    animationSpeed_ = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_SPEED", 1.0, 0.05, 8.0);
-    animationOffsetSeconds_ = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_OFFSET", 0.0, 0.0, 3600.0);
-    LogInfo(std::wstring(L"frame stats: ") + (frameStatsEnabled_ ? L"enabled" : L"disabled"));
-    LogInfo(std::wstring(L"frame trace: ") + (frameTraceEnabled_ ? L"enabled" : L"disabled"));
-    LogInfo(L"animation speed: " + FormatDouble(animationSpeed_, 2) + L"x");
-    LogInfo(L"animation offset: " + FormatDouble(animationOffsetSeconds_, 2) + L"s");
+    LogInfo(std::wstring(L"developer build: ") + (options_.developerBuild ? L"yes" : L"no"));
+    LogInfo(std::wstring(L"diagnostics: ") + (options_.diagnosticsEnabled ? L"enabled" : L"disabled"));
+    LogInfo(std::wstring(L"frame stats: ") + (options_.frameStatsEnabled ? L"enabled" : L"disabled"));
+    LogInfo(std::wstring(L"frame trace: ") + (options_.frameTraceEnabled ? L"enabled" : L"disabled"));
+    LogInfo(L"animation speed: " + FormatDouble(options_.animationSpeed, 2) + L"x");
+    LogInfo(L"animation offset: " + FormatDouble(options_.animationOffsetSeconds, 2) + L"s");
 
     snapshot_ = CaptureDesktopSnapshot();
     LogSnapshot();
@@ -293,7 +253,7 @@ void StageWindow::Close()
 void StageWindow::Paint()
 {
     const ULONGLONG paintStartTick = GetTickCount64();
-    const bool traceFirstPaint = frameTraceEnabled_ && !firstPaintTraceLogged_;
+    const bool traceFirstPaint = options_.frameTraceEnabled && !firstPaintTraceLogged_;
     if (traceFirstPaint) {
         firstPaintTraceLogged_ = true;
         LogInfo(L"paint trace: begin first paint");
@@ -471,7 +431,7 @@ void StageWindow::LogSnapshot() const
         } else {
             const std::wstring reason =
                 icon.image.warning.empty() ? std::wstring(L"no source path") : icon.image.warning;
-            LogWarning(L"snapshot icon image fallback: " + icon.displayName + L" (" + reason + L")");
+            LogInfo(L"snapshot icon image fallback: " + icon.displayName + L" (" + reason + L")");
         }
         ++sampleIndex;
     }
@@ -495,7 +455,7 @@ void StageWindow::ResetFrameStats(ULONGLONG now)
 
 void StageWindow::RecordTimerTick(ULONGLONG now)
 {
-    if (!frameStatsEnabled_) {
+    if (!options_.frameStatsEnabled) {
         return;
     }
 
@@ -511,7 +471,7 @@ void StageWindow::RecordTimerTick(ULONGLONG now)
 
 void StageWindow::RecordPaintFrame(ULONGLONG startTick, ULONGLONG endTick)
 {
-    if (!frameStatsEnabled_) {
+    if (!options_.frameStatsEnabled) {
         return;
     }
 
@@ -524,7 +484,7 @@ void StageWindow::RecordPaintFrame(ULONGLONG startTick, ULONGLONG endTick)
 
 void StageWindow::LogFrameStatsIfDue(ULONGLONG now)
 {
-    if (!frameStatsEnabled_) {
+    if (!options_.frameStatsEnabled) {
         return;
     }
 
@@ -587,8 +547,8 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == kAnimationTimerId) {
             const ULONGLONG now = GetTickCount64();
             RecordTimerTick(now);
-            elapsedSeconds_ = animationOffsetSeconds_ +
-                ((static_cast<double>(now - animationStartTick_) / 1000.0) * animationSpeed_);
+            elapsedSeconds_ = options_.animationOffsetSeconds +
+                ((static_cast<double>(now - animationStartTick_) / 1000.0) * options_.animationSpeed);
             scene_.Update(elapsedSeconds_);
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;

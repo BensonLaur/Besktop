@@ -582,7 +582,7 @@ bool TryExtractShellImageListIcon(
             std::to_wstring(overlayIndex) +
             L")");
     } else if (IsShortcutLikePath(sourcePath)) {
-        besktop::LogWarning(
+        besktop::LogInfo(
             L"shortcut overlay unavailable from system image list: " +
             sourcePath +
             L"; Explorer shortcut arrow may differ");
@@ -606,7 +606,7 @@ bool TryExtractHighResolutionShellIcon(
         if (TryExtractShellImageListIcon(sourcePath, imageListId, icon, method, lastFailure)) {
             return true;
         }
-        besktop::LogWarning(
+        besktop::LogInfo(
             L"high-resolution icon extraction attempt failed: " +
             sourcePath +
             L" (" + lastFailure + L")");
@@ -691,13 +691,13 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
         ++failedCount_;
         const std::wstring reason =
             snapshot.warning.empty() ? L"no icon source path" : snapshot.warning;
-        LogWarning(L"icon image fallback: " + label + L" (" + reason + L")");
+        LogInfo(L"icon image fallback: " + label + L" (" + reason + L")");
         return nullptr;
     }
 
     if (!gdiplusReady_) {
         ++failedCount_;
-        LogWarning(L"icon image fallback: " + label + L" (GDI+ is not ready)");
+        LogInfo(L"icon image fallback: " + label + L" (GDI+ is not ready)");
         return nullptr;
     }
 
@@ -742,7 +742,7 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
             bitmapSourcePath = candidatePath;
             break;
         }
-        LogWarning(
+        LogInfo(
             L"shell item image extraction failed: " +
             label +
             L" -> " +
@@ -760,7 +760,7 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
                 bitmapSourcePath = candidatePath;
                 break;
             }
-            LogWarning(
+            LogInfo(
                 L"high-resolution icon extraction attempt failed: " +
                 label +
                 L" -> " +
@@ -783,7 +783,7 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
 
         if (!shellIcon.IsValid()) {
             ++failedCount_;
-            LogWarning(
+            LogInfo(
                 L"icon image extraction failed: " + label +
                 L" -> " + snapshot.sourcePath +
                 L" (" + failureReason + L")");
@@ -793,7 +793,7 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
         bitmap = BitmapFromIcon(shellIcon.Get(), failureReason);
         if (bitmap == nullptr) {
             ++failedCount_;
-            LogWarning(
+            LogInfo(
                 L"icon image bitmap conversion failed: " + label +
                 L" -> " + bitmapSourcePath +
                 L" (" + failureReason + L")");

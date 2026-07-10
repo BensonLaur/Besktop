@@ -1,5 +1,6 @@
 #include "besktop/render/wallpaper_renderer.h"
 
+#include "besktop/app/runtime_options.h"
 #include "besktop/logging/logger.h"
 
 #include <objidl.h>
@@ -29,28 +30,9 @@ bool FileExists(const std::wstring& path)
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
-bool IsTruthyEnvironmentFlag(const wchar_t* name)
-{
-    wchar_t value[16]{};
-    constexpr auto valueCapacity = static_cast<DWORD>(sizeof(value) / sizeof(value[0]));
-    const DWORD length = GetEnvironmentVariableW(name, value, valueCapacity);
-    if (length == 0 || length >= valueCapacity) {
-        return false;
-    }
-
-    return value[0] == L'1' ||
-        value[0] == L't' ||
-        value[0] == L'T' ||
-        value[0] == L'y' ||
-        value[0] == L'Y' ||
-        value[0] == L'o' ||
-        value[0] == L'O';
-}
-
 bool FrameTraceEnabled()
 {
-    static const bool enabled = IsTruthyEnvironmentFlag(L"BESKTOP_FRAME_TRACE");
-    return enabled;
+    return besktop::GetRuntimeOptions().frameTraceEnabled;
 }
 
 Gdiplus::RectF ToRectF(const RECT& rect)

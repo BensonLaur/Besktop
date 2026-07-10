@@ -104,16 +104,25 @@ Icon Fight 的目标不是做复杂游戏，而是做一个“看一眼就想转
 
 ## 调试开关
 
-开发和动作打磨时可以通过环境变量开启诊断能力：
+Debug 构建默认允许开发者通过环境变量开启诊断能力：
 
 ```powershell
 $env:BESKTOP_FRAME_STATS='1'      # 每秒记录 paint fps / timer fps / paint avg/max
 $env:BESKTOP_FRAME_TRACE='1'      # 记录首帧和壁纸缓存的分段 trace
 $env:BESKTOP_ANIMATION_SPEED='0.5' # 0.5 倍速慢放观察动作，默认 1.0
 $env:BESKTOP_ANIMATION_OFFSET='4.5' # 从动画第 4.5 秒开始，便于直接观察某个动作阶段
+$env:BESKTOP_DEBUG_ICON_PLANE='1'   # 显示图标薄片调试边框
+$env:BESKTOP_RENDER_SHADOWS='1'     # 显示开发期阴影效果
 ```
 
-这些开关只用于调试，不改变真实桌面，不属于用户可见玩法设置。
+普通 Release 构建会忽略上述单项变量，并固定使用 `1.0x` 动画速度和 `0` 秒偏移。需要现场诊断时，必须先显式设置总开关，再设置所需单项：
+
+```powershell
+$env:BESKTOP_ENABLE_DIAGNOSTICS='1'
+$env:BESKTOP_FRAME_TRACE='1'
+```
+
+Debug 或已启用诊断的 Release 会记录详细 Info 日志；普通 Release 默认只记录 Warning/Error，且不会仅因正常启动创建日志。这些开关只用于调试，不改变真实桌面，不属于用户可见玩法设置。
 
 关键文档：
 

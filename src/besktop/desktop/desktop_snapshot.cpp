@@ -536,7 +536,7 @@ DesktopIconSourceIndex BuildDesktopIconSourceIndex()
         std::filesystem::directory_iterator iterator(folder, error);
         if (error) {
             index.warnings.push_back(L"Desktop folder enumeration failed: " + folder.wstring());
-            besktop::LogWarning(L"desktop icon source folder enumeration failed: " + folder.wstring());
+            besktop::LogInfo(L"desktop icon source folder enumeration failed: " + folder.wstring());
             continue;
         }
 
@@ -580,7 +580,7 @@ besktop::DesktopIconImageSnapshot ResolveDesktopIconImageSource(
     besktop::DesktopIconImageSnapshot image;
     image.usedFallback = true;
     image.warning = L"No matching Desktop/Public Desktop file was found.";
-    besktop::LogWarning(L"desktop icon source fallback: " + displayName + L" (" + image.warning + L")");
+    besktop::LogInfo(L"desktop icon source fallback: " + displayName + L" (" + image.warning + L")");
     return image;
 }
 
@@ -729,7 +729,7 @@ std::vector<DesktopShellItemSource> CaptureDesktopShellItemSources(int expectedI
             itemPath = ShellItemDisplayName(shellItem.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
         }
         if (!PathExists(itemPath)) {
-            besktop::LogWarning(
+            besktop::LogInfo(
                 L"desktop shell item source path unavailable: #" +
                 std::to_wstring(index + 1) +
                 L" (" +
@@ -1079,7 +1079,7 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
             const std::wstring& shellDisplayName = shellItemSources[static_cast<size_t>(index)].displayName;
             if (!shellDisplayName.empty() &&
                 NormalizeIconKey(shellDisplayName) != NormalizeIconKey(icon.displayName)) {
-                besktop::LogWarning(
+                besktop::LogInfo(
                     L"desktop shell item display mismatch: listview='" +
                     icon.displayName +
                     L"', shell='" +
@@ -1103,7 +1103,7 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
         } else {
             icon.iconBounds = BuildFallbackIconBounds(icon.bounds);
             icon.usedIconBoundsFallback = true;
-            besktop::LogWarning(L"desktop icon LVIR_ICON fallback: " + icon.displayName);
+            besktop::LogInfo(L"desktop icon LVIR_ICON fallback: " + icon.displayName);
         }
         if (TryReadDesktopListViewLabelRect(listView, explorerProcess, index, icon.labelBounds)) {
             icon.usedLabelBoundsFallback = false;
@@ -1111,7 +1111,7 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
         } else {
             icon.labelBounds = BuildFallbackLabelBounds(icon.bounds, icon.iconBounds);
             icon.usedLabelBoundsFallback = true;
-            besktop::LogWarning(L"desktop icon LVIR_LABEL fallback: " + icon.displayName);
+            besktop::LogInfo(L"desktop icon LVIR_LABEL fallback: " + icon.displayName);
         }
         icon.usedFallback = false;
         snapshot.icons.push_back(icon);

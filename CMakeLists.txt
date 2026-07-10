@@ -36,6 +36,7 @@ target_compile_definitions(besktop_runtime PUBLIC
 
 add_executable(besktop WIN32
     src/besktop/animation/icon_fight_scene.cpp
+    src/besktop/app/runtime_options.cpp
     src/besktop/app/stage_window.cpp
     src/besktop/desktop/desktop_snapshot.cpp
     src/besktop/logging/logger.cpp
@@ -43,6 +44,10 @@ add_executable(besktop WIN32
     src/besktop/render/wallpaper_renderer.cpp
     src/main.cpp
     "${BESKTOP_GENERATED_RESOURCE_FILE}"
+)
+
+target_compile_definitions(besktop PRIVATE
+    $<$<CONFIG:Debug>:BESKTOP_DEVELOPER_BUILD=1>
 )
 
 target_link_libraries(besktop PRIVATE Comctl32 Gdi32 Gdiplus Ole32 Shell32 User32)

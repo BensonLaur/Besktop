@@ -177,7 +177,9 @@ packs/
 - `BESKTOP_ANIMATION_SPEED=<倍率>`：控制动画时间倍率，默认 `1.0`，建议允许慢放观察动作细节。
 - `BESKTOP_ANIMATION_OFFSET=<秒>`：设置动画起始偏移，默认 `0.0`，用于直接观察左走、右走、转身、拳击等指定阶段。
 
-发布版默认关闭帧率统计和分段 trace，避免日志噪声和额外性能开销。后续如果需要用户可见调试，也可以增加隐藏快捷键或 debug overlay，但第一版先以日志为主。
+Debug 构建通过 `BESKTOP_DEVELOPER_BUILD` 明确标记开发者能力，默认允许读取各项诊断环境变量并记录详细 Info 日志。普通 Release 固定使用 `1.0x` 动画速度和 `0` 秒偏移，默认关闭帧率统计、分段 trace 和图标平面调试，并只记录 Warning/Error；过滤掉的 Info 不会触发日志文件创建。
+
+Release 现场诊断必须先设置 `BESKTOP_ENABLE_DIAGNOSTICS=1`，之后才读取其他诊断变量并启用详细 Info 日志。单独残留 `BESKTOP_FRAME_TRACE`、`BESKTOP_DEBUG_ICON_PLANE` 或动画倍率变量不会改变普通 Release 行为。所有运行选项由进程启动时一次性加载的只读 `RuntimeOptions` 提供，场景、舞台和壁纸渲染器不再分别解析环境变量。
 
 ## Plus 扩展边界
 

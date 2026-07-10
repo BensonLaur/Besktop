@@ -4,6 +4,7 @@
 #include <string>
 
 #include "besktop/app/stage_window.h"
+#include "besktop/app/runtime_options.h"
 #include "besktop/logging/logger.h"
 
 namespace {
@@ -95,6 +96,8 @@ void ConfigureDpiAwareness()
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
+    const besktop::RuntimeOptions& options = besktop::GetRuntimeOptions();
+    besktop::ConfigureLogging(options.verboseInfoLogging ? besktop::LogLevel::Info : besktop::LogLevel::Warning);
     ConfigureDpiAwareness();
-    return besktop::RunStageWindow(instance, showCommand);
+    return besktop::RunStageWindow(instance, showCommand, options);
 }

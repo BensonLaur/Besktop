@@ -10,6 +10,7 @@ enum class LogLevel {
     Error,
 };
 
+void ConfigureLogging(LogLevel minimumLevel);
 void Log(LogLevel level, const std::wstring& message);
 void LogInfo(const std::wstring& message);
 void LogWarning(const std::wstring& message);

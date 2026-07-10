@@ -4,11 +4,18 @@
 
 #include <filesystem>
 #include <fstream>
+#include <atomic>
 #include <iterator>
 #include <mutex>
 #include <string>
 
 namespace {
+
+std::atomic<besktop::LogLevel>& MinimumLogLevel()
+{
+    static std::atomic<besktop::LogLevel> level{besktop::LogLevel::Warning};
+    return level;
+}
 
 std::mutex& LogMutex()
 {
@@ -106,6 +113,11 @@ std::wstring Timestamp()
 
 namespace besktop {
 
+void ConfigureLogging(LogLevel minimumLevel)
+{
+    MinimumLogLevel().store(minimumLevel, std::memory_order_relaxed);
+}
+
 std::wstring GetLogFilePath()
 {
     static const std::wstring path = BuildLogFilePath();
@@ -114,6 +126,9 @@ std::wstring GetLogFilePath()
 
 void Log(LogLevel level, const std::wstring& message)
 {
+    if (static_cast<int>(level) < static_cast<int>(MinimumLogLevel().load(std::memory_order_relaxed))) {
+        return;
+    }
     try {
         const std::lock_guard<std::mutex> lock(LogMutex());
         std::ofstream stream(

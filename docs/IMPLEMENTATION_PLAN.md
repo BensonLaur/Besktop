@@ -206,6 +206,8 @@ $env:BESKTOP_ANIMATION_SPEED='0.5'
 $env:BESKTOP_ANIMATION_OFFSET='4.5'
 ```
 
+Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP_ENABLE_DIAGNOSTICS=1`；未设置总开关时，Release 会忽略单项调试变量，并保持 `1.0x` 动画速度、`0` 秒偏移和低噪声 Warning/Error 日志。
+
 - `BESKTOP_FRAME_STATS=1` 用于确认实际帧率和绘制耗时。
 - `BESKTOP_FRAME_TRACE=1` 用于定位首帧、壁纸缓存和渲染阶段问题。
 - `BESKTOP_ANIMATION_SPEED` 用于慢放或加速动画，默认 `1.0`。
