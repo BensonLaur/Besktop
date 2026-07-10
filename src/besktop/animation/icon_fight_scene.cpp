@@ -107,6 +107,85 @@ void DrawCenteredString(
     graphics.DrawString(text.c_str(), -1, &font, rect, &format, &brush);
 }
 
+struct DesktopLabelFontSpec {
+    std::wstring family = L"Microsoft YaHei UI";
+    float pixelSize = 14.0f;
+    bool fromSystem = false;
+};
+
+const DesktopLabelFontSpec& DesktopIconLabelFontSpec()
+{
+    static const DesktopLabelFontSpec spec = [] {
+        LOGFONTW logFont{};
+        if (SystemParametersInfoW(SPI_GETICONTITLELOGFONT, sizeof(logFont), &logFont, 0) &&
+            logFont.lfFaceName[0] != L'\0') {
+            DesktopLabelFontSpec value;
+            value.family = logFont.lfFaceName;
+            const float systemPixelSize = static_cast<float>(std::abs(logFont.lfHeight));
+            value.pixelSize = std::clamp(systemPixelSize * 1.16f, 14.0f, 22.0f);
+            value.fromSystem = true;
+            return value;
+        }
+        return DesktopLabelFontSpec{};
+    }();
+    return spec;
+}
+
+std::wstring DesktopIconLabelFontDescription()
+{
+    const DesktopLabelFontSpec& spec = DesktopIconLabelFontSpec();
+    return spec.family +
+        L" " +
+        std::to_wstring(static_cast<int>(spec.pixelSize)) +
+        L"px" +
+        (spec.fromSystem ? L" (SPI_GETICONTITLELOGFONT)" : L" (fallback)");
+}
+
+void DrawDesktopIconLabel(
+    Gdiplus::Graphics& graphics,
+    const std::wstring& text,
+    const Gdiplus::RectF& rect,
+    double alpha)
+{
+    if (text.empty() || rect.Width <= 1.0f || rect.Height <= 1.0f || alpha <= 0.01) {
+        return;
+    }
+
+    const DesktopLabelFontSpec& fontSpec = DesktopIconLabelFontSpec();
+    Gdiplus::FontFamily fontFamily(fontSpec.family.c_str());
+    Gdiplus::FontFamily fallbackFamily(L"Microsoft YaHei UI");
+    const Gdiplus::FontFamily* selectedFamily = fontFamily.IsAvailable() ? &fontFamily : &fallbackFamily;
+    Gdiplus::Font font(selectedFamily, fontSpec.pixelSize, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+
+    Gdiplus::StringFormat format;
+    format.SetAlignment(Gdiplus::StringAlignmentCenter);
+    format.SetLineAlignment(Gdiplus::StringAlignmentNear);
+    format.SetFormatFlags(Gdiplus::StringFormatFlagsLineLimit);
+    format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+
+    const BYTE textAlpha = static_cast<BYTE>(std::clamp(alpha * 255.0, 0.0, 255.0));
+    const BYTE outlineAlpha = static_cast<BYTE>(std::clamp(alpha * 255.0, 0.0, 255.0));
+    Gdiplus::SolidBrush outlineBrush(Gdiplus::Color(outlineAlpha, 0, 0, 0));
+    Gdiplus::SolidBrush textBrush(Gdiplus::Color(textAlpha, 255, 255, 255));
+
+    constexpr float kOutlineOffset = 1.15f;
+    const Gdiplus::RectF adjustedRect(rect.X, rect.Y - 2.0f, rect.Width, rect.Height + 3.0f);
+    const Gdiplus::RectF outlineRects[] = {
+        Gdiplus::RectF(adjustedRect.X - kOutlineOffset, adjustedRect.Y, adjustedRect.Width, adjustedRect.Height),
+        Gdiplus::RectF(adjustedRect.X + kOutlineOffset, adjustedRect.Y, adjustedRect.Width, adjustedRect.Height),
+        Gdiplus::RectF(adjustedRect.X, adjustedRect.Y - kOutlineOffset, adjustedRect.Width, adjustedRect.Height),
+        Gdiplus::RectF(adjustedRect.X, adjustedRect.Y + kOutlineOffset, adjustedRect.Width, adjustedRect.Height),
+        Gdiplus::RectF(adjustedRect.X - kOutlineOffset, adjustedRect.Y - kOutlineOffset, adjustedRect.Width, adjustedRect.Height),
+        Gdiplus::RectF(adjustedRect.X + kOutlineOffset, adjustedRect.Y - kOutlineOffset, adjustedRect.Width, adjustedRect.Height),
+        Gdiplus::RectF(adjustedRect.X - kOutlineOffset, adjustedRect.Y + kOutlineOffset, adjustedRect.Width, adjustedRect.Height),
+        Gdiplus::RectF(adjustedRect.X + kOutlineOffset, adjustedRect.Y + kOutlineOffset, adjustedRect.Width, adjustedRect.Height),
+    };
+    for (const Gdiplus::RectF& outlineRect : outlineRects) {
+        graphics.DrawString(text.c_str(), -1, &font, outlineRect, &format, &outlineBrush);
+    }
+    graphics.DrawString(text.c_str(), -1, &font, adjustedRect, &format, &textBrush);
+}
+
 struct ActorPose {
     enum class Heading {
         MoveRight,
@@ -912,22 +991,23 @@ void DrawActorLabel(
     const double shake = SmoothStep(0.30, 0.82, elapsedSeconds) * (1.0 - SmoothStep(1.08, 1.48, elapsedSeconds));
     const double jitterX = std::sin((elapsedSeconds * 66.0) + actor.role) * 5.0 * shake;
     const double jitterY = std::cos((elapsedSeconds * 73.0) + actor.role) * 3.0 * shake;
-    const unsigned char alpha = static_cast<unsigned char>(std::clamp(pose.labelAlpha * 230.0, 0.0, 230.0));
     const BodyProjection body = BuildBodyProjection(actor, pose);
     const Gdiplus::RectF bodyBounds = BoundsForPoints(body.points, std::size(body.points));
 
-    Gdiplus::FontFamily fontFamily(L"Microsoft YaHei UI");
-    Gdiplus::Font font(&fontFamily, 15.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    DrawCenteredString(
-        graphics,
-        actor.label,
-        Gdiplus::RectF(
+    Gdiplus::RectF labelRect(
+        ToFloat(actor.labelBounds.left + jitterX),
+        ToFloat(actor.labelBounds.top + jitterY),
+        ToFloat(actor.labelBounds.right - actor.labelBounds.left),
+        ToFloat(actor.labelBounds.bottom - actor.labelBounds.top));
+    if (labelRect.Width <= 1.0f || labelRect.Height <= 1.0f) {
+        labelRect = Gdiplus::RectF(
             ToFloat(pose.x - 82.0 + jitterX),
             ToFloat(bodyBounds.Y + bodyBounds.Height + 6.0 + jitterY),
             164.0f,
-            28.0f),
-        font,
-        Gdiplus::Color(alpha, 252, 252, 252));
+            34.0f);
+    }
+
+    DrawDesktopIconLabel(graphics, actor.label, labelRect, pose.labelAlpha);
 }
 
 const wchar_t* PhaseName(besktop::IconFightScene::ScenePhase phase)
@@ -990,6 +1070,14 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         }
         return std::clamp(value, margin, extent - margin);
     };
+    const auto scaleDesktopRect = [&](const RECT& rect) {
+        return RECT{
+            static_cast<LONG>((rect.left - snapshot.monitorBounds.left) * scaleX),
+            static_cast<LONG>((rect.top - snapshot.monitorBounds.top) * scaleY),
+            static_cast<LONG>((rect.right - snapshot.monitorBounds.left) * scaleX),
+            static_cast<LONG>((rect.bottom - snapshot.monitorBounds.top) * scaleY),
+        };
+    };
 
     const size_t count = std::min<size_t>(snapshot.icons.size(), 5);
     for (size_t index = 0; index < count; ++index) {
@@ -1004,6 +1092,8 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.baseY = (((planeBounds.top + planeBounds.bottom) * 0.5) - snapshot.monitorBounds.top) * scaleY;
         actor.battleX = clampPreviewCenter(actor.baseX, previewMarginX, clientWidth);
         actor.battleY = clampPreviewCenter(actor.baseY, previewMarginY, clientHeight);
+        actor.labelBounds = scaleDesktopRect(icon.labelBounds);
+        actor.usedLabelBoundsFallback = icon.usedLabelBoundsFallback;
         actor.planeWidth = displayPlaneWidth;
         actor.planeHeight = displayPlaneHeight;
         actor.usedPlaneFallback = !hasImageListSize || snapshot.iconDisplay.usedFallback;
@@ -1012,7 +1102,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.red = colors[index % std::size(colors)][0];
         actor.green = colors[index % std::size(colors)][1];
         actor.blue = colors[index % std::size(colors)][2];
-        actor.iconImage = iconImageCache_.Load(icon);
+        actor.iconImage = iconImageCache_.Load(icon.image, actor.label);
         actor.usedIconImageFallback = actor.iconImage == nullptr;
         actors_.push_back(actor);
     }
@@ -1025,6 +1115,13 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.baseY = (clientRect.bottom - clientRect.top) * 0.64;
         actor.battleX = actor.baseX;
         actor.battleY = actor.baseY;
+        actor.labelBounds = RECT{
+            static_cast<LONG>(actor.baseX - 82.0),
+            static_cast<LONG>(actor.baseY + 30.0),
+            static_cast<LONG>(actor.baseX + 82.0),
+            static_cast<LONG>(actor.baseY + 66.0),
+        };
+        actor.usedLabelBoundsFallback = true;
         actor.planeWidth = 48.0;
         actor.planeHeight = 48.0;
         actor.usedPlaneFallback = true;
@@ -1037,12 +1134,19 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     }
 
     LogInfo(L"icon fight scene reset; actors: " + std::to_wstring(actors_.size()));
+    LogInfo(L"icon fight desktop label font: " + DesktopIconLabelFontDescription());
     LogInfo(L"icon fight limb model: local 3D foot plant locomotion; stance=0.60, shared side attach shoulder/hip roots; two-bone leg IK; upperArm=0.30 planeSide, forearm=0.32, thigh=0.40, shin=0.41; bodySideInset=0.035, hipExtraOut=0.0, hipDownOut=0.18");
     LogInfo(L"icon fight body model: double-sided icon plane; back face keeps non-mirrored icon UV order");
     LogInfo(std::wstring(L"icon fight render shadows: ") + (RenderShadowsEnabled() ? L"enabled" : L"disabled"));
     LogInfo(std::wstring(L"icon fight debug icon plane: ") + (DebugIconPlaneEnabled() ? L"enabled" : L"disabled"));
     size_t boundActorCount = 0;
+    size_t labelBoundsActorCount = 0;
     for (const IconActor& actor : actors_) {
+        if (!actor.usedLabelBoundsFallback &&
+            actor.labelBounds.right > actor.labelBounds.left &&
+            actor.labelBounds.bottom > actor.labelBounds.top) {
+            ++labelBoundsActorCount;
+        }
         LogInfo(
             L"icon actor: " + actor.label +
             L" @ " + std::to_wstring(static_cast<int>(actor.baseX)) +
@@ -1054,6 +1158,14 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
             L"; source: " +
             actor.planeSizeSource +
             (actor.usedPlaneFallback ? L" (fallback)" : L""));
+        LogInfo(
+            L"icon actor label bounds: " +
+            actor.label +
+            L" -> " +
+            std::to_wstring(actor.labelBounds.right - actor.labelBounds.left) +
+            L" x " +
+            std::to_wstring(actor.labelBounds.bottom - actor.labelBounds.top) +
+            (actor.usedLabelBoundsFallback ? L" (fallback)" : L" (LVIR_LABEL)"));
         if (actor.iconImage != nullptr) {
             ++boundActorCount;
             LogInfo(
@@ -1081,6 +1193,11 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         std::to_wstring(actors_.size() - boundActorCount) +
         L"; extraction failed: " +
         std::to_wstring(iconImageCache_.FailedCount()));
+    LogInfo(
+        L"icon actor label bounds captured: " +
+        std::to_wstring(labelBoundsActorCount) +
+        L" / " +
+        std::to_wstring(actors_.size()));
 }
 
 void IconFightScene::Update(double elapsedSeconds)

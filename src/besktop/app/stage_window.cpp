@@ -428,6 +428,19 @@ void StageWindow::LogSnapshot() const
         std::to_wstring(iconBoundsCount) +
         L" / " +
         std::to_wstring(snapshot_.icons.size()));
+    size_t labelBoundsCount = 0;
+    for (const DesktopIconSnapshot& icon : snapshot_.icons) {
+        if (!icon.usedLabelBoundsFallback &&
+            icon.labelBounds.right > icon.labelBounds.left &&
+            icon.labelBounds.bottom > icon.labelBounds.top) {
+            ++labelBoundsCount;
+        }
+    }
+    LogInfo(
+        L"desktop icon label bounds: " +
+        std::to_wstring(labelBoundsCount) +
+        L" / " +
+        std::to_wstring(snapshot_.icons.size()));
     size_t sampleIndex = 0;
     for (const DesktopIconSnapshot& icon : snapshot_.icons) {
         const int iconWidth = icon.iconBounds.right - icon.iconBounds.left;
@@ -441,7 +454,9 @@ void StageWindow::LogSnapshot() const
                 L"," +
                 std::to_wstring(icon.listViewPosition.y) +
                 L"; LVIR_ICON: " +
-                FormatRect(icon.iconBounds));
+                FormatRect(icon.iconBounds) +
+                L"; LVIR_LABEL: " +
+                FormatRect(icon.labelBounds));
         }
         LogInfo(
             L"snapshot icon bounds: " +

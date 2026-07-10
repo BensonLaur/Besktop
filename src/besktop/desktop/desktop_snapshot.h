@@ -41,7 +41,9 @@ struct DesktopIconSnapshot {
     POINT listViewPosition{};
     RECT bounds{};
     RECT iconBounds{};
+    RECT labelBounds{};
     bool usedIconBoundsFallback = true;
+    bool usedLabelBoundsFallback = true;
     DesktopIconImageSnapshot image;
     bool usedFallback = true;
 };

@@ -35,7 +35,7 @@ public:
     IconImageCache& operator=(const IconImageCache&) = delete;
 
     void Clear();
-    const IconImage* Load(const DesktopIconSnapshot& icon);
+    const IconImage* Load(const DesktopIconImageSnapshot& image, const std::wstring& label);
 
     size_t ExtractedCount() const;
     size_t FailedCount() const;

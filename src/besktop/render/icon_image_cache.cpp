@@ -28,11 +28,6 @@ std::wstring FormatHResult(HRESULT result)
     return buffer;
 }
 
-std::wstring IconLabel(const besktop::DesktopIconSnapshot& icon)
-{
-    return icon.displayName.empty() ? icon.id : icon.displayName;
-}
-
 std::wstring ToLower(std::wstring value)
 {
     for (wchar_t& ch : value) {
@@ -277,13 +272,12 @@ void IconImageCache::Clear()
     failedCount_ = 0;
 }
 
-const IconImage* IconImageCache::Load(const DesktopIconSnapshot& icon)
+const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, const std::wstring& label)
 {
-    const std::wstring label = IconLabel(icon);
-    if (icon.image.usedFallback || icon.image.sourcePath.empty()) {
+    if (snapshot.usedFallback || snapshot.sourcePath.empty()) {
         ++failedCount_;
         const std::wstring reason =
-            icon.image.warning.empty() ? L"no icon source path" : icon.image.warning;
+            snapshot.warning.empty() ? L"no icon source path" : snapshot.warning;
         LogWarning(L"icon image fallback: " + label + L" (" + reason + L")");
         return nullptr;
     }
@@ -294,7 +288,7 @@ const IconImage* IconImageCache::Load(const DesktopIconSnapshot& icon)
         return nullptr;
     }
 
-    const auto cached = imageByPath_.find(icon.image.sourcePath);
+    const auto cached = imageByPath_.find(snapshot.sourcePath);
     if (cached != imageByPath_.end()) {
         return cached->second;
     }
@@ -302,21 +296,21 @@ const IconImage* IconImageCache::Load(const DesktopIconSnapshot& icon)
     std::wstring failureReason;
     std::wstring extractionMethod;
     UniqueIcon shellIcon;
-    if (!TryExtractHighResolutionShellIcon(icon.image.sourcePath, shellIcon, extractionMethod, failureReason)) {
+    if (!TryExtractHighResolutionShellIcon(snapshot.sourcePath, shellIcon, extractionMethod, failureReason)) {
         LogWarning(
             L"icon high-resolution extraction failed; falling back to large icon: " +
             label +
             L" -> " +
-            icon.image.sourcePath +
+            snapshot.sourcePath +
             L" (" + failureReason + L")");
     }
 
     if (!shellIcon.IsValid() &&
-        !TryExtractFileInfoIcon(icon.image.sourcePath, shellIcon, extractionMethod, failureReason)) {
+        !TryExtractFileInfoIcon(snapshot.sourcePath, shellIcon, extractionMethod, failureReason)) {
         ++failedCount_;
         LogWarning(
             L"icon image extraction failed: " + label +
-            L" -> " + icon.image.sourcePath +
+            L" -> " + snapshot.sourcePath +
             L" (" + failureReason + L")");
         return nullptr;
     }
@@ -326,20 +320,20 @@ const IconImage* IconImageCache::Load(const DesktopIconSnapshot& icon)
         ++failedCount_;
         LogWarning(
             L"icon image bitmap conversion failed: " + label +
-            L" -> " + icon.image.sourcePath +
+            L" -> " + snapshot.sourcePath +
             L" (" + failureReason + L")");
         return nullptr;
     }
 
-    auto image = std::make_unique<IconImage>();
-    image->sourcePath = icon.image.sourcePath;
-    image->extractionMethod = extractionMethod;
-    image->width = bitmap->GetWidth();
-    image->height = bitmap->GetHeight();
-    image->bitmap = std::move(bitmap);
+    auto iconImage = std::make_unique<IconImage>();
+    iconImage->sourcePath = snapshot.sourcePath;
+    iconImage->extractionMethod = extractionMethod;
+    iconImage->width = bitmap->GetWidth();
+    iconImage->height = bitmap->GetHeight();
+    iconImage->bitmap = std::move(bitmap);
 
-    IconImage* imagePtr = image.get();
-    images_.push_back(std::move(image));
+    IconImage* imagePtr = iconImage.get();
+    images_.push_back(std::move(iconImage));
     imageByPath_.emplace(imagePtr->sourcePath, imagePtr);
 
     LogInfo(

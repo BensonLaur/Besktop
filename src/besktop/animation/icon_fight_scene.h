@@ -31,6 +31,8 @@ public:
         double baseY = 0.0;
         double battleX = 0.0;
         double battleY = 0.0;
+        RECT labelBounds{};
+        bool usedLabelBoundsFallback = true;
         double planeWidth = 48.0;
         double planeHeight = 48.0;
         bool usedPlaneFallback = true;

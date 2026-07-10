@@ -574,7 +574,7 @@ bool IsUsableRect(const RECT& rect)
     return rect.right > rect.left && rect.bottom > rect.top;
 }
 
-bool TryReadDesktopListViewIconRect(HWND listView, HANDLE explorerProcess, int index, RECT& iconBounds)
+bool TryReadDesktopListViewItemRect(HWND listView, HANDLE explorerProcess, int index, int rectKind, RECT& bounds)
 {
     RemoteAllocation remote(explorerProcess, sizeof(RECT));
     if (!remote.IsValid()) {
@@ -582,7 +582,7 @@ bool TryReadDesktopListViewIconRect(HWND listView, HANDLE explorerProcess, int i
     }
 
     RECT request{};
-    request.left = LVIR_ICON;
+    request.left = rectKind;
     SIZE_T bytesWritten = 0;
     if (!WriteProcessMemory(explorerProcess, remote.Address(), &request, sizeof(request), &bytesWritten) ||
         bytesWritten != sizeof(request)) {
@@ -601,8 +601,18 @@ bool TryReadDesktopListViewIconRect(HWND listView, HANDLE explorerProcess, int i
         return false;
     }
 
-    iconBounds = result;
+    bounds = result;
     return true;
+}
+
+bool TryReadDesktopListViewIconRect(HWND listView, HANDLE explorerProcess, int index, RECT& iconBounds)
+{
+    return TryReadDesktopListViewItemRect(listView, explorerProcess, index, LVIR_ICON, iconBounds);
+}
+
+bool TryReadDesktopListViewLabelRect(HWND listView, HANDLE explorerProcess, int index, RECT& labelBounds)
+{
+    return TryReadDesktopListViewItemRect(listView, explorerProcess, index, LVIR_LABEL, labelBounds);
 }
 
 bool TryImageListGetIconSize(HIMAGELIST imageList, int* width, int* height)
@@ -671,6 +681,17 @@ RECT BuildFallbackIconBounds(const RECT& itemBounds)
     return RECT{left, top, left + kFallbackIconSize, top + kFallbackIconSize};
 }
 
+RECT BuildFallbackLabelBounds(const RECT& itemBounds, const RECT& iconBounds)
+{
+    constexpr int kFallbackLabelGap = 4;
+    constexpr int kFallbackLabelHeight = 40;
+    const int itemWidth = std::max(72, static_cast<int>(itemBounds.right - itemBounds.left));
+    const int iconCenter = (iconBounds.left + iconBounds.right) / 2;
+    const int left = iconCenter - (itemWidth / 2);
+    const int top = iconBounds.bottom + kFallbackLabelGap;
+    return RECT{left, top, left + itemWidth, top + kFallbackLabelHeight};
+}
+
 bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
 {
     HWND listView = FindDesktopListView();
@@ -714,6 +735,7 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
     int capturedCount = 0;
     int imageSourceCount = 0;
     int iconBoundsCount = 0;
+    int labelBoundsCount = 0;
     for (int index = 0; index < itemCount; ++index) {
         POINT position{};
         if (!TryReadDesktopListViewPosition(listView, explorerProcess, index, position) ||
@@ -743,6 +765,14 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
             icon.usedIconBoundsFallback = true;
             besktop::LogWarning(L"desktop icon LVIR_ICON fallback: " + icon.displayName);
         }
+        if (TryReadDesktopListViewLabelRect(listView, explorerProcess, index, icon.labelBounds)) {
+            icon.usedLabelBoundsFallback = false;
+            ++labelBoundsCount;
+        } else {
+            icon.labelBounds = BuildFallbackLabelBounds(icon.bounds, icon.iconBounds);
+            icon.usedLabelBoundsFallback = true;
+            besktop::LogWarning(L"desktop icon LVIR_LABEL fallback: " + icon.displayName);
+        }
         icon.usedFallback = false;
         snapshot.icons.push_back(icon);
         if (!icon.image.usedFallback) {
@@ -770,6 +800,11 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
         std::to_wstring(iconBoundsCount) +
         L" / " +
         std::to_wstring(capturedCount));
+    besktop::LogInfo(
+        L"desktop icon label bounds captured: " +
+        std::to_wstring(labelBoundsCount) +
+        L" / " +
+        std::to_wstring(capturedCount));
     for (size_t index = 0; index < snapshot.icons.size() && index < 5; ++index) {
         const besktop::DesktopIconSnapshot& icon = snapshot.icons[index];
         besktop::LogInfo(
@@ -780,7 +815,9 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
             L"," +
             std::to_wstring(icon.listViewPosition.y) +
             L"; LVIR_ICON: " +
-            FormatRect(icon.iconBounds));
+            FormatRect(icon.iconBounds) +
+            L"; LVIR_LABEL: " +
+            FormatRect(icon.labelBounds));
     }
     if (imageSourceCount < capturedCount) {
         snapshot.warnings.push_back(
@@ -789,6 +826,10 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
     if (iconBoundsCount < capturedCount) {
         snapshot.warnings.push_back(
             L"Some desktop icon bounds were not resolved; fallback icon plane sizes will be used.");
+    }
+    if (labelBoundsCount < capturedCount) {
+        snapshot.warnings.push_back(
+            L"Some desktop icon label bounds were not resolved; fallback label rectangles will be used.");
     }
     for (const std::wstring& warning : sourceIndex.warnings) {
         snapshot.warnings.push_back(warning);
@@ -823,6 +864,8 @@ void AddDemoIconFallbacks(besktop::DesktopSnapshot& snapshot)
         icon.bounds = RECT{left, top, left + iconWidth, top + iconHeight};
         icon.iconBounds = BuildFallbackIconBounds(icon.bounds);
         icon.usedIconBoundsFallback = true;
+        icon.labelBounds = BuildFallbackLabelBounds(icon.bounds, icon.iconBounds);
+        icon.usedLabelBoundsFallback = true;
         icon.usedFallback = true;
         snapshot.icons.push_back(icon);
     }
