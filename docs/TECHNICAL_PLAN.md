@@ -163,7 +163,7 @@ packs/
 拳击、侧踢和闪避也应复用同一套骨架与 IK：
 
 - 拳击使用手部目标点和命中事件，而不是单独拉长手臂。
-- 侧踢使用脚部目标点、支撑脚锁定和身体反向旋转。
+- 侧踢使用通用双脚目标通道和固定骨长两段 IK：踢击脚按“收膝—伸展—收膝—落地”采样，支撑脚保持中性局部脚底目标；身体反倾和转胯不直接旋转脚端，而是重新求解膝盖位置。
 - 受击使用短 clip 叠加身体薄片晃动、后退和恢复。
 - 命中检测可以先用简化 hitbox，后续再精细化。
 
@@ -186,7 +186,7 @@ packs/
 - `BESKTOP_ANIMATION_SPEED=<倍率>`：控制动画时间倍率，默认 `1.0`，建议允许慢放观察动作细节。
 - `BESKTOP_ANIMATION_OFFSET=<秒>`：设置动画起始偏移，默认 `0.0`，用于直接观察左走、右走、转身、拳击等指定阶段。
 - `BESKTOP_MAX_ACTORS=<数量>`：限制本次创建的演员数量，用于比较不同桌面图标规模下的渲染性能；未设置或设为 `0` 时创建全部演员。
-- `BESKTOP_ACTION_PREVIEW=<动作 ID>`：让首个有效演员在觉醒后原地循环预览 `lead_straight`、`layback` 或 `light_hit_react`。
+- `BESKTOP_ACTION_PREVIEW=<动作 ID>`：让首个有效演员在觉醒后原地循环预览 `lead_straight`、`layback`、`light_hit_react` 或 `side_kick`。
 
 Debug 构建通过 `BESKTOP_DEVELOPER_BUILD` 明确标记开发者能力，默认允许读取各项诊断环境变量并记录详细 Info 日志。普通 Release 固定使用 `1.0x` 动画速度和 `0` 秒偏移，默认关闭帧率统计、分段 trace 和图标平面调试，并只记录 Warning/Error；过滤掉的 Info 不会触发日志文件创建。
 

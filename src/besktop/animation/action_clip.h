@@ -63,6 +63,16 @@ struct ActionSample {
     double handTargetWeight = 0.0;
     bool leadHandTargetEnabled = false;
     bool rearHandTargetEnabled = false;
+    double leadFootForwardOffset = 0.0;
+    double leadFootLift = 0.0;
+    double leadFootDepthOffset = 0.0;
+    double rearFootForwardOffset = 0.0;
+    double rearFootLift = 0.0;
+    double rearFootDepthOffset = 0.0;
+    double footTargetWeight = 0.0;
+    double lowerBodyActionRotationWeight = 0.18;
+    bool leadFootTargetEnabled = false;
+    bool rearFootTargetEnabled = false;
 };
 
 struct ActionClip {

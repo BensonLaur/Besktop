@@ -19,19 +19,27 @@ void Check(bool condition, std::string_view message)
     }
 }
 
+double Distance(const besktop::GaitVec3& first, const besktop::GaitVec3& second);
+
 void TestParsing()
 {
     using namespace besktop;
     Check(ParseActionId(L"lead_straight") == ActionId::LeadStraight, "parse lead_straight");
     Check(ParseActionId(L"layback") == ActionId::Layback, "parse layback");
     Check(ParseActionId(L"light_hit_react") == ActionId::LightHitReact, "parse light_hit_react");
+    Check(ParseActionId(L"side_kick") == ActionId::SideKick, "parse side_kick");
     Check(ParseActionId(L"invalid") == ActionId::None, "invalid name falls back");
 }
 
 void TestPhaseBoundaries()
 {
     using namespace besktop;
-    const ActionId actions[] = {ActionId::LeadStraight, ActionId::Layback, ActionId::LightHitReact};
+    const ActionId actions[] = {
+        ActionId::LeadStraight,
+        ActionId::Layback,
+        ActionId::LightHitReact,
+        ActionId::SideKick,
+    };
     for (const ActionId action : actions) {
         const ActionClip& clip = GetActionClip(action);
         Check(ActionPhaseAt(clip, 0.0) == ActionPhase::Prepare, "prepare phase");
@@ -71,6 +79,143 @@ void TestLoopCanEmitAgain()
     player.Start(ActionId::Layback);
     player.Update(1.0);
     Check(player.ConsumeEvents() != 0, "new loop emits contact marker again");
+}
+
+besktop::GaitVec3 SideKickFootTarget(
+    const besktop::ActionSample& sample,
+    bool leadLeg,
+    double direction,
+    double planeSide)
+{
+    using namespace besktop;
+    const double heading = direction < 0.0 ? -1.0 : 1.0;
+    const double sideSign = leadLeg ? heading : -heading;
+    const double depthSign = leadLeg ? 1.0 : -1.0;
+    const GaitGeometry geometry = BuildGaitGeometry(
+        planeSide, planeSide * 0.40, planeSide * 0.41);
+    const double forwardOffset = leadLeg ?
+        sample.leadFootForwardOffset : sample.rearFootForwardOffset;
+    const double lift = leadLeg ? sample.leadFootLift : sample.rearFootLift;
+    const double depthOffset = leadLeg ?
+        sample.leadFootDepthOffset : sample.rearFootDepthOffset;
+    return GaitVec3{
+        sideSign * geometry.stride * 0.10 + heading * forwardOffset * planeSide,
+        geometry.legDrop - lift * planeSide,
+        depthSign * (geometry.footDepth + depthOffset * planeSide),
+    };
+}
+
+besktop::TwoBoneIkSolution SolveSideKickLeg(
+    const besktop::ActionSample& sample,
+    bool leadLeg,
+    double direction,
+    double planeSide)
+{
+    using namespace besktop;
+    const double heading = direction < 0.0 ? -1.0 : 1.0;
+    const double depthSign = leadLeg ? 1.0 : -1.0;
+    return SolveTwoBoneIk(
+        GaitVec3{},
+        SideKickFootTarget(sample, leadLeg, direction, planeSide),
+        planeSide * 0.40,
+        planeSide * 0.41,
+        GaitVec3{heading, 0.0, depthSign * 0.18});
+}
+
+void TestSideKickGeometryAndEvents()
+{
+    using namespace besktop;
+    constexpr double planeSide = 48.0;
+    constexpr double thighLength = planeSide * 0.40;
+    constexpr double shinLength = planeSide * 0.41;
+    constexpr std::array<double, 6> sampleTimes{0.0, 0.18, 0.32, 0.37, 0.53, 0.72};
+
+    const ActionClip& clip = GetActionClip(ActionId::SideKick);
+    Check(std::abs(clip.prepareEnd - 0.20) < 1e-9, "side kick prepare timing");
+    Check(std::abs(clip.activeEnd - 0.35) < 1e-9, "side kick active timing");
+    Check(std::abs(clip.contactEnd - 0.41) < 1e-9, "side kick contact timing");
+    Check(std::abs(clip.recoverEnd - 0.72) < 1e-9, "side kick recover timing");
+    Check(std::abs(clip.duration - 0.86) < 1e-9, "side kick total timing");
+
+    ActionPlayer normal;
+    normal.Start(ActionId::SideKick);
+    for (int frame = 0; frame < 60; ++frame) {
+        normal.Update(1.0 / 60.0);
+    }
+    Check(normal.ConsumeEvents() != 0, "side kick normal playback emits contact");
+    Check(normal.ConsumeEvents() == 0, "side kick normal contact is consumed once");
+
+    ActionPlayer skipped;
+    skipped.Start(ActionId::SideKick, 1.0, 8.0);
+    skipped.Update(0.10);
+    Check(skipped.ConsumeEvents() != 0, "side kick large step crosses contact");
+    Check(skipped.ConsumeEvents() == 0, "side kick large-step contact is consumed once");
+    skipped.Update(0.10);
+    Check(skipped.ConsumeEvents() == 0, "side kick contact does not repeat later");
+
+    const GaitVec3 plantedSupport = SolveSideKickLeg(
+        SampleAction(clip, 0.0, 1.0), false, 1.0, planeSide).end;
+    double maximumSupportDrift = 0.0;
+    for (const double time : sampleTimes) {
+        const ActionSample rightSample = SampleAction(clip, time, 1.0);
+        const ActionSample leftSample = SampleAction(clip, time, -1.0);
+        const TwoBoneIkSolution kickLeg = SolveSideKickLeg(rightSample, true, 1.0, planeSide);
+        const TwoBoneIkSolution supportLeg = SolveSideKickLeg(rightSample, false, 1.0, planeSide);
+        maximumSupportDrift = std::max(
+            maximumSupportDrift,
+            Distance(plantedSupport, supportLeg.end));
+
+        Check(std::abs(Distance(kickLeg.root, kickLeg.joint) - thighLength) < 1e-6,
+            "side kick thigh keeps fixed length");
+        Check(std::abs(Distance(kickLeg.joint, kickLeg.end) - shinLength) < 1e-6,
+            "side kick shin keeps fixed length");
+        Check(std::abs(Distance(supportLeg.root, supportLeg.joint) - thighLength) < 1e-6,
+            "side kick support thigh keeps fixed length");
+        Check(std::abs(Distance(supportLeg.joint, supportLeg.end) - shinLength) < 1e-6,
+            "side kick support shin keeps fixed length");
+
+        const double kickKnee = JointInteriorAngleDegrees(kickLeg);
+        const double supportKnee = JointInteriorAngleDegrees(supportLeg);
+        Check(kickKnee > 35.0 && kickKnee < 178.0, "side kick knee does not reverse or lock");
+        Check(supportKnee >= 165.0 && supportKnee <= 178.0,
+            "side kick support knee stays naturally long");
+
+        const GaitVec3 rightTarget = SideKickFootTarget(rightSample, true, 1.0, planeSide);
+        const GaitVec3 leftTarget = SideKickFootTarget(leftSample, true, -1.0, planeSide);
+        Check(std::abs(rightTarget.x + leftTarget.x) < 1e-9,
+            "side kick left and right foot targets mirror horizontally");
+        Check(std::abs(rightTarget.y - leftTarget.y) < 1e-9,
+            "side kick mirror keeps foot height");
+        Check(std::abs(JointInteriorAngleDegrees(kickLeg) -
+            JointInteriorAngleDegrees(SolveSideKickLeg(leftSample, true, -1.0, planeSide))) < 1e-9,
+            "side kick mirror keeps knee angle");
+    }
+
+    const ActionSample prepare = SampleAction(clip, 0.18, 1.0);
+    const ActionSample contact = SampleAction(clip, 0.37, 1.0);
+    const double prepareKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(prepare, true, 1.0, planeSide));
+    const double contactKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(contact, true, 1.0, planeSide));
+    Check(prepareKnee >= 80.0 && prepareKnee <= 140.0,
+        "side kick prepare clearly chambers the knee");
+    Check(contactKnee >= 160.0 && contactKnee <= 176.0,
+        "side kick contact extends without locking the knee");
+    Check(maximumSupportDrift <= planeSide * 0.005,
+        "side kick support foot remains planted");
+
+    const ActionSample complete = SampleAction(clip, clip.duration, 1.0);
+    Check(std::abs(complete.leadFootForwardOffset) < 1e-9 &&
+        std::abs(complete.leadFootLift) < 1e-9 &&
+        std::abs(complete.leadFootDepthOffset) < 1e-9 &&
+        std::abs(complete.bodyRotateY) < 1e-9 &&
+        std::abs(complete.bodyRotateZ) < 1e-9 &&
+        complete.handTargetWeight < 1e-9,
+        "side kick completes at neutral pose");
+    std::cout << "side kick metrics: prepare knee=" << prepareKnee
+              << ", contact knee=" << contactKnee
+              << ", support drift=" << maximumSupportDrift
+              << ", thigh/shin=" << thighLength << "/" << shinLength << '\n';
 }
 
 void TestMirroringKeepsTimeline()
@@ -237,6 +382,7 @@ int main()
     TestSkippedContactIsConsumedOnce();
     TestLoopCanEmitAgain();
     TestMirroringKeepsTimeline();
+    TestSideKickGeometryAndEvents();
     TestGaitGeometry();
     if (failures == 0) {
         std::cout << "besktop_action_tests: all checks passed\n";

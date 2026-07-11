@@ -18,6 +18,9 @@ constexpr besktop::ActionEvent kLaybackEvents[] = {
 constexpr besktop::ActionEvent kLightHitReactEvents[] = {
     {besktop::ActionEventType::Contact, 0.16, kContactEventMask},
 };
+constexpr besktop::ActionEvent kSideKickEvents[] = {
+    {besktop::ActionEventType::Contact, 0.35, kContactEventMask},
+};
 
 constexpr besktop::ActionClip kNoneClip{};
 constexpr besktop::ActionClip kLeadStraightClip{
@@ -29,6 +32,9 @@ constexpr besktop::ActionClip kLaybackClip{
 constexpr besktop::ActionClip kLightHitReactClip{
     besktop::ActionId::LightHitReact, 0.08, 0.16, 0.22, 0.46, 0.62,
     kLightHitReactEvents, std::size(kLightHitReactEvents)};
+constexpr besktop::ActionClip kSideKickClip{
+    besktop::ActionId::SideKick, 0.20, 0.35, 0.41, 0.72, 0.86,
+    kSideKickEvents, std::size(kSideKickEvents)};
 
 double Clamp01(double value)
 {
@@ -66,6 +72,9 @@ ActionId ParseActionId(std::wstring_view name)
     if (name == L"light_hit_react") {
         return ActionId::LightHitReact;
     }
+    if (name == L"side_kick") {
+        return ActionId::SideKick;
+    }
     return ActionId::None;
 }
 
@@ -78,6 +87,8 @@ std::wstring_view ActionIdName(ActionId id)
         return L"layback";
     case ActionId::LightHitReact:
         return L"light_hit_react";
+    case ActionId::SideKick:
+        return L"side_kick";
     case ActionId::None:
         return L"none";
     default:
@@ -94,6 +105,8 @@ const ActionClip& GetActionClip(ActionId id)
         return kLaybackClip;
     case ActionId::LightHitReact:
         return kLightHitReactClip;
+    case ActionId::SideKick:
+        return kSideKickClip;
     default:
         return kNoneClip;
     }
@@ -175,6 +188,32 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         sample.leadHandDepth = 0.22;
         sample.rearHandForward = 0.02 - 0.08 * follow;
         sample.rearHandY = -0.24 + 0.05 * follow;
+        break;
+    }
+    case ActionId::SideKick: {
+        const double chamber = Segment(time, 0.0, clip.prepareEnd) *
+            (1.0 - Segment(time, 0.55, clip.recoverEnd));
+        const double extension = Segment(time, clip.prepareEnd, clip.activeEnd) *
+            (1.0 - Segment(time, clip.contactEnd, 0.55));
+        const double balance = std::max(chamber * 0.55, extension);
+
+        // Targets are offsets from the neutral planted feet. This lets the
+        // scene keep the support foot fixed while the hip and body rebalance.
+        sample.leadFootTargetEnabled = true;
+        sample.rearFootTargetEnabled = true;
+        sample.footTargetWeight = 1.0;
+        sample.lowerBodyActionRotationWeight = 0.0;
+        sample.leadFootForwardOffset = 0.11 * chamber + 0.565 * extension;
+        sample.leadFootLift = 0.20 * chamber + 0.315 * extension;
+        sample.leadFootDepthOffset = 0.03 * chamber + 0.02 * extension;
+        sample.bodyRotateY = mirror * 10.0 * kPi / 180.0 * balance;
+        sample.bodyRotateZ = mirror * -8.0 * kPi / 180.0 * balance;
+        sample.leadHandForward = -0.10 - 0.08 * balance;
+        sample.leadHandY = -0.33 + 0.05 * balance;
+        sample.leadHandDepth = 0.24;
+        sample.rearHandForward = -0.18 + 0.05 * balance;
+        sample.rearHandY = -0.17 - 0.04 * balance;
+        sample.rearHandDepth = 0.20;
         break;
     }
     default:

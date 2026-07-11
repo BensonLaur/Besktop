@@ -771,7 +771,8 @@ JointChain BuildLegChain(
     const ActorPose& lowerBodyPose,
     double planeSide,
     double thighLength,
-    double shinLength)
+    double shinLength,
+    bool leadLeg)
 {
     const double headingSign = HeadingSign(pose);
     const besktop::GaitGeometry gaitGeometry = besktop::BuildGaitGeometry(
@@ -798,6 +799,25 @@ JointChain BuildLegChain(
         footTarget.y = groundY - (sample.footLift * 0.55);
         footTarget.z = hip.z + (depthSign * planeSide * 0.10);
         bendHint = Vec3{static_cast<double>(sideSign), 0.0, depthSign * 0.18};
+    }
+
+    const besktop::ActionSample& action = pose.action;
+    const bool targetEnabled = leadLeg ? action.leadFootTargetEnabled : action.rearFootTargetEnabled;
+    if (targetEnabled && action.footTargetWeight > 0.001) {
+        const double forwardOffset = leadLeg ?
+            action.leadFootForwardOffset : action.rearFootForwardOffset;
+        const double lift = leadLeg ? action.leadFootLift : action.rearFootLift;
+        const double depthOffset = leadLeg ?
+            action.leadFootDepthOffset : action.rearFootDepthOffset;
+        const Vec3 actionTarget{
+            footTarget.x + headingSign * forwardOffset * planeSide,
+            footTarget.y - lift * planeSide,
+            footTarget.z + depthSign * depthOffset * planeSide,
+        };
+        const double weight = Clamp01(action.footTargetWeight);
+        footTarget.x = LerpValue(footTarget.x, actionTarget.x, weight);
+        footTarget.y = LerpValue(footTarget.y, actionTarget.y, weight);
+        footTarget.z = LerpValue(footTarget.z, actionTarget.z, weight);
     }
 
     const LocalJointChain local = BuildTwoBoneIkChain(
@@ -840,7 +860,8 @@ LimbPose BuildLimbPose(
     const double thighLength = planeSide * 0.40;
     const double shinLength = planeSide * 0.41;
     ActorPose lowerBodyPose = pose;
-    constexpr double kLowerBodyActionRotation = 0.18;
+    const double kLowerBodyActionRotation = std::clamp(
+        pose.action.lowerBodyActionRotationWeight, 0.0, 1.0);
     lowerBodyPose.rotateX -= pose.action.bodyRotateX * (1.0 - kLowerBodyActionRotation);
     lowerBodyPose.rotateY -= pose.action.bodyRotateY * (1.0 - kLowerBodyActionRotation);
     lowerBodyPose.rotateZ -= pose.action.bodyRotateZ * (1.0 - kLowerBodyActionRotation);
@@ -852,9 +873,9 @@ LimbPose BuildLimbPose(
     limbs.rightArm = BuildArmChain(
         rightShoulder, 1, rightDepthSign, pose, planeSide, upperArmLength, forearmLength, rightLead);
     limbs.leftLeg = BuildLegChain(
-        leftHip, -1, leftDepthSign, pose, lowerBodyPose, planeSide, thighLength, shinLength);
+        leftHip, -1, leftDepthSign, pose, lowerBodyPose, planeSide, thighLength, shinLength, !rightLead);
     limbs.rightLeg = BuildLegChain(
-        rightHip, 1, rightDepthSign, pose, lowerBodyPose, planeSide, thighLength, shinLength);
+        rightHip, 1, rightDepthSign, pose, lowerBodyPose, planeSide, thighLength, shinLength, rightLead);
     return limbs;
 }
 
