@@ -674,9 +674,10 @@ besktop::DesktopIconImageSnapshot ResolveDesktopIconImageSource(
         const auto found = index.pathByName.find(NormalizeIconKey(probeName));
         if (found != index.pathByName.end()) {
             besktop::DesktopIconImageSnapshot image;
-            image.sourcePath = found->second.path;
+            image.sourceKind = besktop::DesktopIconImageSourceKind::FileSystemPath;
+            image.sourceIdentifier = found->second.path;
             image.usedFallback = false;
-            besktop::LogInfo(L"desktop icon source matched: " + displayName + L" -> " + image.sourcePath);
+            besktop::LogInfo(L"desktop icon source matched: " + displayName + L" -> " + image.sourceIdentifier);
             return image;
         }
     }
@@ -828,22 +829,24 @@ std::vector<DesktopShellItemSource> CaptureDesktopShellItemSources(int expectedI
             continue;
         }
 
-        std::wstring itemPath = ShellItemDisplayName(shellItem.Get(), SIGDN_FILESYSPATH);
-        if (itemPath.empty()) {
-            itemPath = ShellItemDisplayName(shellItem.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
+        DesktopShellItemSource source;
+        const std::wstring fileSystemPath = ShellItemDisplayName(shellItem.Get(), SIGDN_FILESYSPATH);
+        if (!fileSystemPath.empty() && PathExists(fileSystemPath)) {
+            source.image.sourceKind = besktop::DesktopIconImageSourceKind::FileSystemPath;
+            source.image.sourceIdentifier = fileSystemPath;
+        } else {
+            const std::wstring parsingName = ShellItemDisplayName(shellItem.Get(), SIGDN_DESKTOPABSOLUTEPARSING);
+            if (!parsingName.empty()) {
+                source.image.sourceKind = besktop::DesktopIconImageSourceKind::ShellParsingName;
+                source.image.sourceIdentifier = parsingName;
+            }
         }
-        if (!PathExists(itemPath)) {
+        if (source.image.sourceKind == besktop::DesktopIconImageSourceKind::None) {
             besktop::LogInfo(
-                L"desktop shell item source path unavailable: #" +
-                std::to_wstring(index + 1) +
-                L" (" +
-                itemPath +
-                L")");
+                L"desktop shell item source unavailable: #" + std::to_wstring(index + 1));
             continue;
         }
 
-        DesktopShellItemSource source;
-        source.image.sourcePath = itemPath;
         source.image.usedFallback = false;
         source.displayName = ShellItemDisplayName(shellItem.Get(), SIGDN_NORMALDISPLAY);
         sources[static_cast<size_t>(index)] = std::move(source);
@@ -1159,6 +1162,7 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
     const int itemCount = static_cast<int>(itemCountResult);
     CaptureDesktopIconDisplayMetrics(snapshot, listView);
     const std::vector<DesktopShellItemSource> shellItemSources = CaptureDesktopShellItemSources(itemCount);
+    std::vector<bool> shellItemSourceUsed(shellItemSources.size(), false);
     const DesktopIconSourceIndex sourceIndex = BuildDesktopIconSourceIndex();
     int capturedCount = 0;
     int imageSourceCount = 0;
@@ -1177,20 +1181,39 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
         besktop::DesktopIconSnapshot icon;
         icon.id = L"desktop-listview-icon-" + std::to_wstring(index + 1);
         icon.displayName = ReadDesktopListViewText(listView, explorerProcess, index);
-        if (index < static_cast<int>(shellItemSources.size()) &&
-            !shellItemSources[static_cast<size_t>(index)].image.usedFallback) {
-            icon.image = shellItemSources[static_cast<size_t>(index)].image;
-            const std::wstring& shellDisplayName = shellItemSources[static_cast<size_t>(index)].displayName;
-            if (!shellDisplayName.empty() &&
-                NormalizeIconKey(shellDisplayName) != NormalizeIconKey(icon.displayName)) {
-                besktop::LogInfo(
-                    L"desktop shell item display mismatch: listview='" +
-                    icon.displayName +
-                    L"', shell='" +
-                    shellDisplayName +
-                    L"'");
+        size_t matchedShellIndex = shellItemSources.size();
+        const std::wstring normalizedListName = NormalizeIconKey(icon.displayName);
+        if (index < static_cast<int>(shellItemSources.size())) {
+            const DesktopShellItemSource& indexedSource = shellItemSources[static_cast<size_t>(index)];
+            if (!indexedSource.image.usedFallback &&
+                NormalizeIconKey(indexedSource.displayName) == normalizedListName) {
+                matchedShellIndex = static_cast<size_t>(index);
             }
-            besktop::LogInfo(L"desktop icon shell source matched: " + icon.displayName + L" -> " + icon.image.sourcePath);
+        }
+        if (matchedShellIndex == shellItemSources.size()) {
+            size_t uniqueMatch = shellItemSources.size();
+            bool ambiguous = false;
+            for (size_t shellIndex = 0; shellIndex < shellItemSources.size(); ++shellIndex) {
+                if (shellItemSourceUsed[shellIndex] || shellItemSources[shellIndex].image.usedFallback ||
+                    NormalizeIconKey(shellItemSources[shellIndex].displayName) != normalizedListName) {
+                    continue;
+                }
+                if (uniqueMatch != shellItemSources.size()) {
+                    ambiguous = true;
+                    break;
+                }
+                uniqueMatch = shellIndex;
+            }
+            if (!ambiguous) {
+                matchedShellIndex = uniqueMatch;
+            } else {
+                besktop::LogInfo(L"desktop shell item display match is ambiguous; using file index fallback");
+            }
+        }
+        if (matchedShellIndex != shellItemSources.size()) {
+            icon.image = shellItemSources[matchedShellIndex].image;
+            shellItemSourceUsed[matchedShellIndex] = true;
+            besktop::LogInfo(L"desktop icon shell source matched: " + icon.displayName + L" -> " + icon.image.sourceIdentifier);
         } else {
             icon.image = ResolveDesktopIconImageSource(sourceIndex, icon.displayName);
         }

@@ -14,7 +14,7 @@
 namespace besktop {
 
 struct IconImage {
-    std::wstring sourcePath;
+    std::wstring sourceIdentifier;
     std::wstring extractionMethod;
     std::unique_ptr<Gdiplus::Bitmap> bitmap;
     UINT width = 0;
@@ -45,7 +45,7 @@ private:
     bool gdiplusReady_ = false;
     size_t failedCount_ = 0;
     std::vector<std::unique_ptr<IconImage>> images_;
-    std::unordered_map<std::wstring, IconImage*> imageByPath_;
+    std::unordered_map<std::wstring, IconImage*> imageBySource_;
 };
 
 } // namespace besktop

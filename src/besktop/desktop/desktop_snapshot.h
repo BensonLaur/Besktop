@@ -23,8 +23,15 @@ struct WallpaperSnapshot {
     bool usedFallback = false;
 };
 
+enum class DesktopIconImageSourceKind {
+    None,
+    FileSystemPath,
+    ShellParsingName,
+};
+
 struct DesktopIconImageSnapshot {
-    std::wstring sourcePath;
+    DesktopIconImageSourceKind sourceKind = DesktopIconImageSourceKind::None;
+    std::wstring sourceIdentifier;
     bool usedFallback = true;
     std::wstring warning;
 };

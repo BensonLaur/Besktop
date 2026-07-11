@@ -469,11 +469,12 @@ std::unique_ptr<Gdiplus::Bitmap> BitmapFromHBitmap(HBITMAP bitmap, std::wstring&
 
 bool TryExtractShellItemBitmap(
     const std::wstring& path,
+    bool iconOnly,
     std::unique_ptr<Gdiplus::Bitmap>& bitmap,
     std::wstring& method,
     std::wstring& failureReason)
 {
-    if (!PathExists(path)) {
+    if (!iconOnly && !PathExists(path)) {
         failureReason = L"path does not exist";
         return false;
     }
@@ -496,7 +497,10 @@ bool TryExtractShellItemBitmap(
 
     UniqueBitmapHandle shellBitmap;
     SIZE size{256, 256};
-    const SIIGBF flags = static_cast<SIIGBF>(SIIGBF_BIGGERSIZEOK | SIIGBF_SCALEUP);
+    SIIGBF flags = static_cast<SIIGBF>(SIIGBF_BIGGERSIZEOK | SIIGBF_SCALEUP);
+    if (iconOnly) {
+        flags = static_cast<SIIGBF>(flags | SIIGBF_ICONONLY);
+    }
     const HRESULT imageResult = imageFactory->GetImage(size, flags, shellBitmap.Put());
     if (FAILED(imageResult) || !shellBitmap.IsValid()) {
         failureReason = L"IShellItemImageFactory::GetImage failed (" + FormatHResult(imageResult) + L")";
@@ -509,6 +513,37 @@ bool TryExtractShellItemBitmap(
     }
 
     method = L"IShellItemImageFactory";
+    return true;
+}
+
+bool TryExtractShellParsingNamePidlIcon(
+    const std::wstring& parsingName,
+    UniqueIcon& icon,
+    std::wstring& method,
+    std::wstring& failureReason)
+{
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    const HRESULT parseResult = SHParseDisplayName(parsingName.c_str(), nullptr, &pidl, 0, nullptr);
+    if (FAILED(parseResult) || pidl == nullptr) {
+        failureReason = L"SHParseDisplayName failed (" + FormatHResult(parseResult) + L")";
+        return false;
+    }
+
+    SHFILEINFOW fileInfo{};
+    const DWORD_PTR result = SHGetFileInfoW(
+        reinterpret_cast<LPCWSTR>(pidl),
+        0,
+        &fileInfo,
+        sizeof(fileInfo),
+        SHGFI_PIDL | SHGFI_ICON | SHGFI_LARGEICON);
+    CoTaskMemFree(pidl);
+    if (result == 0 || fileInfo.hIcon == nullptr) {
+        failureReason = L"SHGetFileInfoW(SHGFI_PIDL) failed (" + FormatWin32Error(GetLastError()) + L")";
+        return false;
+    }
+
+    icon.Reset(fileInfo.hIcon);
+    method = L"SHGetFileInfoW(SHGFI_PIDL|SHGFI_LARGEICON)";
     return true;
 }
 
@@ -681,13 +716,13 @@ IconImageCache::~IconImageCache()
 void IconImageCache::Clear()
 {
     images_.clear();
-    imageByPath_.clear();
+    imageBySource_.clear();
     failedCount_ = 0;
 }
 
 const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, const std::wstring& label)
 {
-    if (snapshot.usedFallback || snapshot.sourcePath.empty()) {
+    if (snapshot.usedFallback || snapshot.sourceIdentifier.empty()) {
         ++failedCount_;
         const std::wstring reason =
             snapshot.warning.empty() ? L"no icon source path" : snapshot.warning;
@@ -701,9 +736,47 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
         return nullptr;
     }
 
-    const auto cached = imageByPath_.find(snapshot.sourcePath);
-    if (cached != imageByPath_.end()) {
+    const std::wstring cacheKey =
+        (snapshot.sourceKind == DesktopIconImageSourceKind::ShellParsingName ? L"shell:" : L"file:") +
+        snapshot.sourceIdentifier;
+    const auto cached = imageBySource_.find(cacheKey);
+    if (cached != imageBySource_.end()) {
         return cached->second;
+    }
+
+    if (snapshot.sourceKind == DesktopIconImageSourceKind::ShellParsingName) {
+        std::wstring failureReason;
+        std::wstring extractionMethod;
+        std::unique_ptr<Gdiplus::Bitmap> bitmap;
+        if (!TryExtractShellItemBitmap(
+                snapshot.sourceIdentifier, true, bitmap, extractionMethod, failureReason)) {
+            LogInfo(L"virtual shell item image factory failed: " + snapshot.sourceIdentifier + L" (" + failureReason + L")");
+            UniqueIcon shellIcon;
+            if (!TryExtractShellParsingNamePidlIcon(
+                    snapshot.sourceIdentifier, shellIcon, extractionMethod, failureReason)) {
+                ++failedCount_;
+                LogInfo(L"virtual shell item PIDL icon failed: " + snapshot.sourceIdentifier + L" (" + failureReason + L")");
+                return nullptr;
+            }
+            bitmap = BitmapFromIcon(shellIcon.Get(), failureReason);
+            if (bitmap == nullptr) {
+                ++failedCount_;
+                LogInfo(L"virtual shell item icon conversion failed (" + failureReason + L")");
+                return nullptr;
+            }
+        }
+
+        auto iconImage = std::make_unique<IconImage>();
+        iconImage->sourceIdentifier = snapshot.sourceIdentifier;
+        iconImage->extractionMethod = extractionMethod;
+        iconImage->width = bitmap->GetWidth();
+        iconImage->height = bitmap->GetHeight();
+        iconImage->bitmap = std::move(bitmap);
+        IconImage* imagePtr = iconImage.get();
+        images_.push_back(std::move(iconImage));
+        imageBySource_.emplace(cacheKey, imagePtr);
+        LogInfo(L"virtual shell item image extracted: " + snapshot.sourceIdentifier + L" (" + extractionMethod + L")");
+        return imagePtr;
     }
 
     std::vector<std::wstring> candidatePaths;
@@ -716,7 +789,7 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
         }
     };
 
-    const std::wstring shortcutTarget = ResolveShortcutTargetPath(snapshot.sourcePath);
+    const std::wstring shortcutTarget = ResolveShortcutTargetPath(snapshot.sourceIdentifier);
     if (!shortcutTarget.empty()) {
         std::error_code error;
         const std::filesystem::path targetPath(shortcutTarget);
@@ -728,7 +801,7 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
             addCandidate(shortcutTarget);
         }
     }
-    addCandidate(snapshot.sourcePath);
+    addCandidate(snapshot.sourceIdentifier);
 
     std::wstring failureReason;
     std::wstring extractionMethod;
@@ -737,7 +810,7 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
     for (const std::wstring& candidatePath : candidatePaths) {
         std::wstring candidateFailure;
         std::wstring candidateMethod;
-        if (TryExtractShellItemBitmap(candidatePath, bitmap, candidateMethod, candidateFailure)) {
+        if (TryExtractShellItemBitmap(candidatePath, false, bitmap, candidateMethod, candidateFailure)) {
             extractionMethod = candidateMethod;
             bitmapSourcePath = candidatePath;
             break;
@@ -785,7 +858,7 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
             ++failedCount_;
             LogInfo(
                 L"icon image extraction failed: " + label +
-                L" -> " + snapshot.sourcePath +
+                L" -> " + snapshot.sourceIdentifier +
                 L" (" + failureReason + L")");
             return nullptr;
         }
@@ -802,9 +875,9 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
     }
 
     auto iconImage = std::make_unique<IconImage>();
-    iconImage->sourcePath = snapshot.sourcePath;
+    iconImage->sourceIdentifier = snapshot.sourceIdentifier;
     iconImage->extractionMethod = extractionMethod;
-    if (!bitmapSourcePath.empty() && bitmapSourcePath != snapshot.sourcePath) {
+    if (!bitmapSourcePath.empty() && bitmapSourcePath != snapshot.sourceIdentifier) {
         iconImage->extractionMethod += L" via " + bitmapSourcePath;
     }
     iconImage->width = bitmap->GetWidth();
@@ -813,11 +886,11 @@ const IconImage* IconImageCache::Load(const DesktopIconImageSnapshot& snapshot, 
 
     IconImage* imagePtr = iconImage.get();
     images_.push_back(std::move(iconImage));
-    imageByPath_.emplace(imagePtr->sourcePath, imagePtr);
+    imageBySource_.emplace(cacheKey, imagePtr);
 
     LogInfo(
             L"icon image extracted: " + label +
-        L" -> " + imagePtr->sourcePath +
+        L" -> " + imagePtr->sourceIdentifier +
         L" (" + std::to_wstring(imagePtr->width) +
         L" x " + std::to_wstring(imagePtr->height) +
         L", " + imagePtr->extractionMethod + L")");

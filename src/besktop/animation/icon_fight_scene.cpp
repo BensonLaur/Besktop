@@ -1198,7 +1198,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
                 L"icon actor image bound: " +
                 actor.label +
                 L" -> " +
-                actor.iconImage->sourcePath +
+                actor.iconImage->sourceIdentifier +
                 L" (" +
                 std::to_wstring(actor.iconImage->width) +
                 L" x " +

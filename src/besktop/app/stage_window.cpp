@@ -386,7 +386,7 @@ void StageWindow::LogSnapshot() const
         L")");
     size_t iconImageSourceCount = 0;
     for (const DesktopIconSnapshot& icon : snapshot_.icons) {
-        if (!icon.image.usedFallback && !icon.image.sourcePath.empty()) {
+        if (!icon.image.usedFallback && !icon.image.sourceIdentifier.empty()) {
             ++iconImageSourceCount;
         }
     }
@@ -446,8 +446,8 @@ void StageWindow::LogSnapshot() const
             L" x " +
             std::to_wstring(iconHeight) +
             (icon.usedIconBoundsFallback ? L" (fallback)" : L" (LVIR_ICON)"));
-        if (!icon.image.usedFallback && !icon.image.sourcePath.empty()) {
-            LogInfo(L"snapshot icon image source: " + icon.displayName + L" -> " + icon.image.sourcePath);
+        if (!icon.image.usedFallback && !icon.image.sourceIdentifier.empty()) {
+            LogInfo(L"snapshot icon image source: " + icon.displayName + L" -> " + icon.image.sourceIdentifier);
         } else {
             const std::wstring reason =
                 icon.image.warning.empty() ? std::wstring(L"no source path") : icon.image.warning;
