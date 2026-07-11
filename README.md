@@ -131,6 +131,7 @@ Debug 或已启用诊断的 Release 会记录详细 Info 日志；普通 Release
 - 技术方案：[docs/TECHNICAL_PLAN.md](docs/TECHNICAL_PLAN.md)
 - 实施计划：[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
 - 仓库定位和发布模型：[docs/REPOSITORY_AND_RELEASE_MODEL.md](docs/REPOSITORY_AND_RELEASE_MODEL.md)
+- Core 单 EXE 发布构建：[docs/RELEASE.md](docs/RELEASE.md)
 - 插件框架 MVP：[docs/MVP_PLUGIN_FRAMEWORK.md](docs/MVP_PLUGIN_FRAMEWORK.md)
 
 ## 仓库关系

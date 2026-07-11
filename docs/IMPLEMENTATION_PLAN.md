@@ -177,6 +177,8 @@ Recovering
 
 ## 构建与验证
 
+公开 Core `0.1.0` 的可分发测试产物使用 `tools/build-release.ps1` 生成。CMake 项目版本是 C++ 版本常量与 GUI Windows 版本资源的唯一来源；MSVC Release 使用 `/MT`，发布脚本会运行 Pack CLI、检查外部 MSVC 运行库依赖并输出 `dist/Besktop.exe` 和 SHA-256。详细步骤见 `docs/RELEASE.md`。
+
 构建路径沿用当前 VS2022 + CMake + NMake 流程：
 
 ```powershell

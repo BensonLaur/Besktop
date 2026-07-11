@@ -1,6 +1,7 @@
 # Build output
 build/
 build*/
+dist/
 out/
 bin/
 obj/
@@ -19,6 +20,7 @@ compile_commands.json
 .env
 *.log
 *.tmp
+SHA256SUMS.txt
 
 # IDE
 .vs/

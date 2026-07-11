@@ -209,6 +209,10 @@ Besktop.exe
 
 用户下载和传播的是一个 exe。内部可以有包、插件、资源段或追加数据，但这些属于实现细节。
 
+公开 Core 首版使用 CMake `project()` 的 `0.1.0` 作为唯一版本来源，由配置阶段生成 C++ 版本头和 GUI `VERSIONINFO`；Pack RCDATA 保持为 GUI 与验证 CLI 共用的公共资源，GUI 文件元数据使用独立资源模板。MSVC 构建统一使用静态 C/C++ 运行库（Release `/MT`、Debug `/MTd`），Windows 系统 DLL 仍由系统提供。
+
+`tools/build-release.ps1` 从专用 Release 目录重建 GUI 和 Pack CLI，验证内置 Pack、版本字段和运行库依赖，再输出 `dist/Besktop.exe` 及 SHA-256。当前工程不包含代码签名、安装器、自动更新或最终品牌图标，这些均不属于“单 EXE 可运行”的含义。
+
 可选的后续形态：
 
 - 单 exe 内置所有首批 Plus 内容，适合第一版传播。
