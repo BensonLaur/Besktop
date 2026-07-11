@@ -167,6 +167,8 @@ packs/
 
 动作数据未来可以从 JSON 或紧凑二进制资源加载，方便免费包和 Plus 包共用同一套运行时。免费核心动作应先覆盖走路、转身、拳击、侧踢、闪避、受击；Plus 后续只扩展更多动作风格和社交玩法，不改变 Core 的骨架与动作格式。
 
+第一轮格斗动作的统一命名、候选优先级和冻结范围见 [FIGHT_ACTION_CATALOG.md](FIGHT_ACTION_CATALOG.md)；与当前 `IconFightScene` 对接的数据结构、接触事件、简化命中和分阶段实施顺序见 [FIGHT_ACTION_IMPLEMENTATION.md](FIGHT_ACTION_IMPLEMENTATION.md)。
+
 第一版推荐把基础动作数据作为内置资源嵌入 `Besktop.exe`。Plus 内容如果随商业版一起发布，也优先在 Besktop-Plus 的打包阶段压缩、签名后嵌入最终 exe，而不是要求用户手动管理外部包文件。
 
 动作打磨阶段保留时间缩放和时间偏移能力。默认动画速度为 `1.0x`，开发者可以用 `BESKTOP_ANIMATION_SPEED=0.5` 之类的环境变量慢放观察步态、转身、拳击和受击细节；也可以用 `BESKTOP_ANIMATION_OFFSET=4.5` 直接从指定动画秒数附近开始，减少反复等待。该能力只影响 Besktop 舞台内的动画时间，不改变系统时间、真实桌面或渲染帧率。
