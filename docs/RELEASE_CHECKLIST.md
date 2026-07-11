@@ -6,10 +6,11 @@
 
 | 项目 | 结果 | 状态 |
 | --- | --- | --- |
-| RC1 基线提交 | `1215ebf feat(app): 增加 Besktop 应用图标` | 通过 |
+| 当前工程基线 | `b262501 fix(icon): 修复跨位宽桌面图标绑定` | 通过 |
 | 产品版本 | `0.1.0` | 通过 |
-| 候选产物 | `dist/Besktop.exe`，572,416 字节 | 通过 |
-| 本轮 SHA-256 | `D40EFD618E23D50605FCDB3CC23A2834D956FA5B0253C8BDE11A621AFB9887A8` | 通过 |
+| 候选产物 | `Besktop.exe`（x64，572,416 字节）、`Besktop-win32.exe`（x86，493,056 字节） | 通过 |
+| x64 SHA-256 | `07913B08AC9A8FD219F2AF919A47BAFD254748F9FC93F308D604536F0CE68F32` | 通过 |
+| Win32 SHA-256 | `D89355ECCFE01DE00123D9B511BE0B05242FDCE218FDF1DB70AA28940ECADED9` | 通过 |
 
 该哈希只标识本轮 RC1 测试产物；正式创建 Release 时必须重新构建并记录最终附件哈希。
 
@@ -19,17 +20,18 @@
 | --- | --- | --- |
 | Debug `besktop` | MSVC x64 clean-first 构建成功 | 通过 |
 | Debug `besktop_mvp_cli` | 构建并成功读取内嵌 Icon Fight Basic Pack | 通过 |
-| Release `besktop` | 发布脚本 clean-first 构建成功 | 通过 |
-| Release `besktop_mvp_cli` | 构建并成功读取内嵌 Icon Fight Basic Pack | 通过 |
+| Release `besktop` | x64/Win32 独立目录 clean-first 构建成功 | 通过 |
+| Release `besktop_mvp_cli` | x64/Win32 构建并读取内嵌 Icon Fight Basic Pack | 通过 |
 | CTest | Debug/Release 均执行成功；仓库当前未注册自动化测试 | 通过 |
-| 单 EXE 输出 | 文件名严格为 `Besktop.exe`，文件非空 | 通过 |
+| 双架构单 EXE 输出 | x64 为 `Besktop.exe`，x86 为 `Besktop-win32.exe`，文件非空 | 通过 |
+| PE 架构 | 脚本自动验证 x64 与 x86/PE32 | 通过 |
 | FileVersion | `0.1.0.0` | 通过 |
 | ProductVersion | `0.1.0` | 通过 |
 | 文件元数据 | ProductName、FileDescription、OriginalFilename、InternalName 正确 | 通过 |
 | Pack RCDATA | GUI 内嵌资源存在，CLI 验证通过 | 通过 |
 | DLL 依赖 | `dumpbin /dependents` 未发现外部 MSVC Runtime 或项目 DLL | 通过 |
 | 输出目录 | 未发现意外 DLL | 通过 |
-| SHA-256 清单 | `dist/SHA256SUMS.txt` 已由脚本生成，未纳入 Git | 通过 |
+| SHA-256 清单 | 只包含本轮实际生成产物，未纳入 Git | 通过 |
 
 构建环境：Visual Studio 2022 Community 17.9.1、MSVC 19.39.33520、Windows SDK 10.0.22621.0、CMake 4.3.1。
 
@@ -50,6 +52,7 @@
 | 独立空目录启动 | 仅复制 `Besktop.exe` 后可启动 | 通过 |
 | `Esc` 退出 | 退出码 0 | 通过 |
 | `Ctrl+Shift+B` 退出 | 退出码 0 | 通过 |
+| 双架构 GUI 烟雾测试 | x64 使用 `Esc`、x86 使用 `Ctrl+Shift+B`，退出码均为 0 | 通过 |
 | 临时副本清理 | 仅删除本轮创建的临时目录 | 通过 |
 | 普通 Release 日志 | 仅新增通用 Warning，无 Info 和桌面项隐私明细 | 通过 |
 | 默认动画倍率/偏移 | 代码路径固定为 `1.0` / `0`，视觉节奏待人工观察 | 待人工验证 |
@@ -84,10 +87,11 @@
 | Windows 11 | 当前分辨率 | 150% | 底部 | 待人工验证 |
 | Windows 10 LTSC 1809 | 虚拟机分辨率 | 100% | 底部 | 待人工验证 |
 | Windows 10 LTSC 1809 | 虚拟机分辨率 | 100% | 自动隐藏 | 待人工验证 |
+| Windows 7 32 位 | 人工测试环境 | 人工测试环境 | 上、下、左、右 | 通过 |
 | Windows 10/11 | 任意 | 任意 | 顶部、左侧、右侧 | 待人工验证 |
 | 多显示器与第三方 Shell | 任意 | 任意 | 任意 | 待人工验证 |
 
-顶部、左侧、右侧任务栏及复杂多显示器组合属于发布后兼容性验证范围，当前不声明已经验证。
+Windows 7 32 位的四向任务栏已人工验证；其他系统上的特殊任务栏位置及复杂多显示器组合仍不声明已经验证。
 
 ## 安全与信誉
 
