@@ -1,4 +1,8 @@
-﻿# Besktop
+﻿<p align="center">
+  <img src="resources/app/besktop-icon-master.png" alt="Besktop Logo" width="180">
+</p>
+
+# Besktop
 
 > 我的电脑“中毒”了：桌面图标开始打架。
 > 不是病毒，不删文件，只是一个让桌面图标开打的 Windows 桌面整活工具。
