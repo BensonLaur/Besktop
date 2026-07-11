@@ -390,11 +390,13 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
     pose.action = actor.actionSample;
     const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
     pose.x += pose.facing * pose.action.rootOffsetForward * planeSide;
+    pose.x += pose.action.rootOffsetLateral * planeSide;
     pose.y += pose.action.rootOffsetY * planeSide;
     pose.rotateX += pose.action.bodyRotateX;
     pose.rotateY += pose.action.bodyRotateY;
     pose.rotateZ += pose.action.bodyRotateZ;
     pose.punch = pose.action.punchStrength;
+    pose.kick = pose.action.kickStrength;
     pose.dodge = pose.action.dodgeStrength;
     pose.hit = pose.action.hitStrength;
     return pose;
@@ -839,6 +841,9 @@ LimbPose BuildLimbPose(
     lowerBodyPose.rotateX -= pose.action.bodyRotateX * (1.0 - kLowerBodyActionRotation);
     lowerBodyPose.rotateY -= pose.action.bodyRotateY * (1.0 - kLowerBodyActionRotation);
     lowerBodyPose.rotateZ -= pose.action.bodyRotateZ * (1.0 - kLowerBodyActionRotation);
+    lowerBodyPose.rotateX += pose.action.lowerBodyRotateX;
+    lowerBodyPose.rotateY += pose.action.lowerBodyRotateY;
+    lowerBodyPose.rotateZ += pose.action.lowerBodyRotateZ;
 
     LimbPose limbs;
     const bool rightLead = rightFront;

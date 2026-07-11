@@ -7,7 +7,7 @@
 > 我的电脑“中毒”了：桌面图标开始打架。
 > 不是病毒，不删文件，只是一个让桌面图标开打的 Windows 桌面整活工具。
 
-Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一个安全的全屏舞台，让全部桌面图标像小角色一样错峰醒来、长出白色手脚并自由闲逛。打架动作将在后续版本加入。
+Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一个安全的全屏舞台，让全部桌面图标像小角色一样错峰醒来、长出白色手脚并自由闲逛。第一轮单演员基础动作库已经可以通过诊断预览逐个打磨；双演员配对、真实命中和自动战斗仍将在后续版本加入。
 
 ## 运行效果
 
@@ -95,7 +95,7 @@ Icon Fight 的目标不是做复杂游戏，而是做一个“看一眼就想转
 - 感染演出模式实施计划。
 - 最小玩法包加载 MVP。
 
-下一步继续打磨漫游视觉、任务栏复刻和兼容性；拳击、侧踢、闪避、受击等打架动作延后。
+下一步先用固定双演员交互验证攻击、防守与结果反馈，不直接开启全量群架。
 
 ## 技术方向
 
@@ -124,7 +124,16 @@ $env:BESKTOP_ACTION_PREVIEW='lead_straight' # 首演员原地循环预览动作
 $env:BESKTOP_TURN_PREVIEW='1'       # 首演员原地循环预览连续 3D 转身
 ```
 
-阶段 A 已支持 `lead_straight`、`layback`、`light_hit_react`、`side_kick` 四个动作预览 ID。预览会等待首个演员完成觉醒和四肢生长，再暂停该演员的随机漫游并循环播放；推荐配合 `BESKTOP_MAX_ACTORS=1` 和 `BESKTOP_ANIMATION_SPEED=0.5` 观察。`BESKTOP_TURN_PREVIEW=1` 使用同一诊断约定循环展示左右连续转身；未设置预览时，现有全量觉醒与自由漫游行为不变。
+第一轮单演员动作库支持以下预览 ID：
+
+```text
+lead_straight  rear_straight  uppercut  hook  swing_punch
+layback  slip_left  slip_right  parry
+front_kick  side_kick  roundhouse_kick  spinning_back_kick
+light_hit_react  heavy_stagger  whiff_recovery
+```
+
+预览会等待首个演员完成觉醒和四肢生长，再暂停该演员的随机漫游并循环播放；推荐配合 `BESKTOP_MAX_ACTORS=1` 和 `BESKTOP_ANIMATION_SPEED=0.5` 观察。`BESKTOP_TURN_PREVIEW=1` 使用同一诊断约定循环展示左右连续转身；未设置预览时，现有全量觉醒与自由漫游行为不变。当前预览只验证单演员动作数据和姿态，不包含目标、命中、伤害或自动战斗。
 
 普通 Release 构建会忽略上述单项变量，并固定使用 `1.0x` 动画速度和 `0` 秒偏移。需要现场诊断时，必须先显式设置总开关，再设置所需单项：
 

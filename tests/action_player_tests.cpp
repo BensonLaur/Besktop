@@ -7,10 +7,12 @@
 #include <cmath>
 #include <iostream>
 #include <string_view>
+#include <utility>
 
 namespace {
 
 int failures = 0;
+constexpr double kPi = 3.14159265358979323846;
 
 void Check(bool condition, std::string_view message)
 {
@@ -25,21 +27,52 @@ double Distance(const besktop::GaitVec3& first, const besktop::GaitVec3& second)
 void TestParsing()
 {
     using namespace besktop;
-    Check(ParseActionId(L"lead_straight") == ActionId::LeadStraight, "parse lead_straight");
-    Check(ParseActionId(L"layback") == ActionId::Layback, "parse layback");
-    Check(ParseActionId(L"light_hit_react") == ActionId::LightHitReact, "parse light_hit_react");
-    Check(ParseActionId(L"side_kick") == ActionId::SideKick, "parse side_kick");
+    constexpr std::pair<std::wstring_view, ActionId> actions[] = {
+        {L"lead_straight", ActionId::LeadStraight},
+        {L"rear_straight", ActionId::RearStraight},
+        {L"uppercut", ActionId::Uppercut},
+        {L"hook", ActionId::Hook},
+        {L"swing_punch", ActionId::SwingPunch},
+        {L"layback", ActionId::Layback},
+        {L"slip_left", ActionId::SlipLeft},
+        {L"slip_right", ActionId::SlipRight},
+        {L"parry", ActionId::Parry},
+        {L"front_kick", ActionId::FrontKick},
+        {L"side_kick", ActionId::SideKick},
+        {L"roundhouse_kick", ActionId::RoundhouseKick},
+        {L"spinning_back_kick", ActionId::SpinningBackKick},
+        {L"light_hit_react", ActionId::LightHitReact},
+        {L"heavy_stagger", ActionId::HeavyStagger},
+        {L"whiff_recovery", ActionId::WhiffRecovery},
+    };
+    for (const auto& [name, id] : actions) {
+        Check(ParseActionId(name) == id, "public action name parses");
+        Check(ActionIdName(id) == name, "action name round trips");
+    }
     Check(ParseActionId(L"invalid") == ActionId::None, "invalid name falls back");
+    Check(ActionIdName(ActionId::None) == L"none", "none has a stable name");
 }
 
 void TestPhaseBoundaries()
 {
     using namespace besktop;
     const ActionId actions[] = {
+        ActionId::SwingPunch,
         ActionId::LeadStraight,
+        ActionId::RearStraight,
+        ActionId::Hook,
+        ActionId::Uppercut,
+        ActionId::FrontKick,
+        ActionId::RoundhouseKick,
+        ActionId::SpinningBackKick,
         ActionId::Layback,
+        ActionId::SlipLeft,
+        ActionId::SlipRight,
+        ActionId::Parry,
         ActionId::LightHitReact,
         ActionId::SideKick,
+        ActionId::HeavyStagger,
+        ActionId::WhiffRecovery,
     };
     for (const ActionId action : actions) {
         const ActionClip& clip = GetActionClip(action);
@@ -49,6 +82,22 @@ void TestPhaseBoundaries()
         Check(ActionPhaseAt(clip, clip.contactEnd) == ActionPhase::Recover, "recover boundary");
         Check(ActionPhaseAt(clip, clip.recoverEnd) == ActionPhase::Complete, "complete blend boundary");
         Check(ActionPhaseAt(clip, clip.duration) == ActionPhase::Complete, "duration complete");
+        Check(clip.prepareEnd > 0.0 &&
+            clip.prepareEnd < clip.activeEnd &&
+            clip.activeEnd < clip.contactEnd &&
+            clip.contactEnd < clip.recoverEnd &&
+            clip.recoverEnd < clip.duration,
+            "phase boundaries are strictly monotonic");
+        const ActionSample complete = SampleAction(clip, clip.duration, 1.0);
+        Check(std::abs(complete.bodyRotateX) < 1e-9 &&
+            std::abs(complete.bodyRotateY) < 1e-9 &&
+            std::abs(complete.bodyRotateZ) < 1e-9 &&
+            std::abs(complete.rootOffsetForward) < 1e-9 &&
+            std::abs(complete.rootOffsetLateral) < 1e-9 &&
+            std::abs(complete.rootOffsetY) < 1e-9 &&
+            complete.handTargetWeight < 1e-9 &&
+            complete.footTargetWeight < 1e-9,
+            "completed action returns channels to neutral");
     }
 }
 
@@ -56,28 +105,69 @@ void TestSkippedContactIsConsumedOnce()
 {
     using namespace besktop;
     ActionPlayer player;
-    player.Start(ActionId::LeadStraight);
-    player.Update(0.60);
-    Check(player.ConsumeEvents() != 0, "large delta crosses contact");
-    Check(player.ConsumeEvents() == 0, "contact consumed once");
-    player.Update(0.20);
-    Check(player.ConsumeEvents() == 0, "later update does not repeat contact");
-    Check(player.IsComplete(), "action completes");
+    const ActionId attacks[] = {
+        ActionId::LeadStraight,
+        ActionId::RearStraight,
+        ActionId::Uppercut,
+        ActionId::Hook,
+        ActionId::SwingPunch,
+        ActionId::FrontKick,
+        ActionId::SideKick,
+        ActionId::RoundhouseKick,
+        ActionId::SpinningBackKick,
+    };
+    for (const ActionId attack : attacks) {
+        const ActionClip& clip = GetActionClip(attack);
+        Check(clip.eventCount == 1, "attack owns one contact event");
+        Check(clip.events[0].timeSeconds >= clip.activeEnd &&
+            clip.events[0].timeSeconds < clip.contactEnd,
+            "contact event lies inside contact phase");
+        player.Start(attack);
+        while (!player.IsComplete()) {
+            player.Update(1.0 / 60.0);
+        }
+        Check(player.ConsumeEvents() != 0, "normal playback emits attack contact");
+        Check(player.ConsumeEvents() == 0, "normal attack contact is consumed once");
+        player.Start(attack);
+        player.Update(clip.duration);
+        Check(player.ConsumeEvents() != 0, "large delta crosses attack contact");
+        Check(player.ConsumeEvents() == 0, "attack contact consumed once");
+        player.Update(0.20);
+        Check(player.ConsumeEvents() == 0, "later update does not repeat contact");
+        Check(player.IsComplete(), "attack completes");
 
-    player.Start(ActionId::LeadStraight, 1.0, 8.0);
-    player.Update(0.10);
-    Check(player.ConsumeEvents() != 0, "8x playback does not skip contact");
-    Check(player.ConsumeEvents() == 0, "8x contact remains single-consume");
+        player.Start(attack, 1.0, 8.0);
+        player.Update(clip.duration);
+        Check(player.ConsumeEvents() != 0, "8x playback does not skip attack contact");
+        Check(player.ConsumeEvents() == 0, "8x attack contact remains single-consume");
+    }
+
+    const ActionId nonAttacks[] = {
+        ActionId::Layback,
+        ActionId::SlipLeft,
+        ActionId::SlipRight,
+        ActionId::Parry,
+        ActionId::LightHitReact,
+        ActionId::HeavyStagger,
+        ActionId::WhiffRecovery,
+    };
+    for (const ActionId action : nonAttacks) {
+        const ActionClip& clip = GetActionClip(action);
+        Check(clip.eventCount == 0, "defense and feedback actions do not emit contact");
+        player.Start(action, 1.0, 8.0);
+        player.Update(clip.duration);
+        Check(player.ConsumeEvents() == 0, "non-attack remains contact-free at large delta");
+    }
 }
 
 void TestLoopCanEmitAgain()
 {
     using namespace besktop;
     ActionPlayer player;
-    player.Start(ActionId::Layback);
+    player.Start(ActionId::LeadStraight);
     player.Update(1.0);
     Check(player.ConsumeEvents() != 0, "first loop emits contact marker");
-    player.Start(ActionId::Layback);
+    player.Start(ActionId::LeadStraight);
     player.Update(1.0);
     Check(player.ConsumeEvents() != 0, "new loop emits contact marker again");
 }
@@ -219,21 +309,337 @@ void TestSideKickGeometryAndEvents()
               << ", thigh/shin=" << thighLength << "/" << shinLength << '\n';
 }
 
+besktop::TwoBoneIkSolution SolveActionArm(
+    const besktop::ActionSample& sample,
+    bool leadArm,
+    double direction,
+    double planeSide)
+{
+    using namespace besktop;
+    const double heading = direction < 0.0 ? -1.0 : 1.0;
+    const double depthSign = leadArm ? heading : -heading;
+    const double forward = leadArm ? sample.leadHandForward : sample.rearHandForward;
+    const double targetY = leadArm ? sample.leadHandY : sample.rearHandY;
+    const double targetDepth = leadArm ? sample.leadHandDepth : sample.rearHandDepth;
+    const GaitVec3 shoulder{0.0, -planeSide * 0.10, depthSign * planeSide * 0.24};
+    const GaitVec3 target{
+        shoulder.x + heading * forward * planeSide,
+        targetY * planeSide,
+        depthSign * targetDepth * planeSide,
+    };
+    return SolveTwoBoneIk(
+        shoulder,
+        target,
+        planeSide * 0.30,
+        planeSide * 0.32,
+        GaitVec3{0.0, 1.0, depthSign * 0.25});
+}
+
+void TestActionMetadataAndDefenseWindows()
+{
+    using namespace besktop;
+    const ActionId punches[] = {
+        ActionId::LeadStraight,
+        ActionId::RearStraight,
+        ActionId::Uppercut,
+        ActionId::Hook,
+        ActionId::SwingPunch,
+    };
+    const ActionId kicks[] = {
+        ActionId::FrontKick,
+        ActionId::SideKick,
+        ActionId::RoundhouseKick,
+        ActionId::SpinningBackKick,
+    };
+    for (const ActionId id : punches) {
+        const ActionClip& clip = GetActionClip(id);
+        Check(clip.attackType == ActionAttackType::Punch,
+            "punch metadata identifies attack type");
+        Check(clip.hitStrength != ActionHitStrength::None,
+            "punch metadata identifies hit strength");
+        const ActionSample prepare = SampleAction(clip, clip.prepareEnd * 0.8, 1.0);
+        const ActionSample contact = SampleAction(clip, (clip.activeEnd + clip.contactEnd) * 0.5, 1.0);
+        const double poseDifference =
+            std::abs(contact.bodyRotateY - prepare.bodyRotateY) +
+            std::abs(contact.rootOffsetForward - prepare.rootOffsetForward) +
+            std::abs(contact.leadHandForward - prepare.leadHandForward) +
+            std::abs(contact.rearHandForward - prepare.rearHandForward) +
+            std::abs(contact.punchStrength - prepare.punchStrength);
+        Check(poseDifference > 0.20, "punch contact differs measurably from prepare");
+    }
+    for (const ActionId id : kicks) {
+        const ActionClip& clip = GetActionClip(id);
+        Check(clip.attackType == ActionAttackType::Kick,
+            "kick metadata identifies attack type");
+        Check(clip.hitStrength != ActionHitStrength::None,
+            "kick metadata identifies hit strength");
+        const ActionSample prepare = SampleAction(clip, clip.prepareEnd * 0.8, 1.0);
+        const ActionSample contact = SampleAction(clip, (clip.activeEnd + clip.contactEnd) * 0.5, 1.0);
+        const double poseDifference =
+            std::abs(contact.bodyRotateY - prepare.bodyRotateY) +
+            std::abs(contact.leadFootForwardOffset - prepare.leadFootForwardOffset) +
+            std::abs(contact.leadFootLift - prepare.leadFootLift) +
+            std::abs(contact.leadFootDepthOffset - prepare.leadFootDepthOffset) +
+            std::abs(contact.kickStrength - prepare.kickStrength);
+        Check(poseDifference > 0.20, "kick contact differs measurably from prepare");
+    }
+
+    const ActionClip& slipLeft = GetActionClip(ActionId::SlipLeft);
+    const ActionClip& slipRight = GetActionClip(ActionId::SlipRight);
+    Check(slipLeft.defenseWindow.type == ActionDefenseWindowType::Evade &&
+        slipRight.defenseWindow.type == ActionDefenseWindowType::Evade,
+        "slips expose evade windows");
+    Check(std::abs(slipLeft.defenseWindow.startSeconds - slipRight.defenseWindow.startSeconds) < 1e-9 &&
+        std::abs(slipLeft.defenseWindow.endSeconds - slipRight.defenseWindow.endSeconds) < 1e-9,
+        "slip evade windows share a timeline");
+    Check(ActionDefenseWindowAt(slipLeft, slipLeft.defenseWindow.startSeconds) ==
+        ActionDefenseWindowType::Evade,
+        "evade window includes its start");
+    Check(ActionDefenseWindowAt(slipLeft, slipLeft.defenseWindow.endSeconds) ==
+        ActionDefenseWindowType::None,
+        "evade window excludes its end");
+
+    const ActionClip& parry = GetActionClip(ActionId::Parry);
+    Check(ActionDefenseWindowAt(parry, 0.20) == ActionDefenseWindowType::Parry,
+        "parry exposes a queryable parry window");
+    Check(ActionDefenseWindowAt(parry, 0.05) == ActionDefenseWindowType::None,
+        "parry window is inactive during early prepare");
+    Check(GetActionClip(ActionId::WhiffRecovery).whiffRecovery,
+        "whiff recovery metadata is explicit");
+}
+
+void TestPunchPoseMathematics()
+{
+    using namespace besktop;
+    constexpr double planeSide = 48.0;
+    constexpr double upperArmLength = planeSide * 0.30;
+    constexpr double forearmLength = planeSide * 0.32;
+    const ActionId punches[] = {
+        ActionId::LeadStraight,
+        ActionId::RearStraight,
+        ActionId::Uppercut,
+        ActionId::Hook,
+        ActionId::SwingPunch,
+    };
+    for (const ActionId id : punches) {
+        const ActionClip& clip = GetActionClip(id);
+        const ActionSample contact = SampleAction(clip, (clip.activeEnd + clip.contactEnd) * 0.5, 1.0);
+        for (const bool leadArm : {false, true}) {
+            const TwoBoneIkSolution arm = SolveActionArm(contact, leadArm, 1.0, planeSide);
+            Check(std::abs(Distance(arm.root, arm.joint) - upperArmLength) < 1e-6,
+                "punch upper arm keeps fixed length");
+            Check(std::abs(Distance(arm.joint, arm.end) - forearmLength) < 1e-6,
+                "punch forearm keeps fixed length");
+        }
+    }
+
+    const ActionClip& leadClip = GetActionClip(ActionId::LeadStraight);
+    const ActionSample leadPrepare = SampleAction(leadClip, leadClip.prepareEnd * 0.8, 1.0);
+    const ActionSample leadContact = SampleAction(leadClip, 0.32, 1.0);
+    const double leadPrepareReach = Distance(
+        SolveActionArm(leadPrepare, true, 1.0, planeSide).root,
+        SolveActionArm(leadPrepare, true, 1.0, planeSide).end);
+    const double leadContactReach = Distance(
+        SolveActionArm(leadContact, true, 1.0, planeSide).root,
+        SolveActionArm(leadContact, true, 1.0, planeSide).end);
+    Check(leadContactReach > leadPrepareReach + planeSide * 0.25,
+        "lead straight extends clearly from prepare to contact");
+
+    const ActionClip& rearClip = GetActionClip(ActionId::RearStraight);
+    const ActionSample rearContact = SampleAction(rearClip, 0.35, 1.0);
+    Check(rearContact.rearHandForward > rearContact.leadHandForward + 0.35,
+        "rear straight drives the rear hand target");
+
+    const ActionClip& uppercutClip = GetActionClip(ActionId::Uppercut);
+    const ActionSample uppercutPrepare = SampleAction(uppercutClip, 0.20, 1.0);
+    const ActionSample uppercutContact = SampleAction(uppercutClip, 0.41, 1.0);
+    Check(uppercutContact.rearHandY < uppercutPrepare.rearHandY - 0.35,
+        "uppercut hand target rises from low to high");
+
+    const ActionSample hookContact = SampleAction(GetActionClip(ActionId::Hook), 0.37, 1.0);
+    const ActionSample swingContact = SampleAction(GetActionClip(ActionId::SwingPunch), 0.51, 1.0);
+    const double hookElbow = JointInteriorAngleDegrees(
+        SolveActionArm(hookContact, true, 1.0, planeSide));
+    const double swingElbow = JointInteriorAngleDegrees(
+        SolveActionArm(swingContact, true, 1.0, planeSide));
+    Check(hookElbow < 145.0, "hook keeps a visibly bent elbow at contact");
+    Check(swingContact.leadHandDepth - 0.20 > hookContact.leadHandDepth - 0.20 + 0.10,
+        "swing punch uses a wider depth arc than hook");
+    Check(std::abs(swingContact.bodyRotateY) > std::abs(hookContact.bodyRotateY) + 0.10,
+        "swing punch rotates the body more than hook");
+
+    std::cout << "punch metrics: lead reach=" << leadPrepareReach << "->" << leadContactReach
+              << ", hook/swing elbow=" << hookElbow << "/" << swingElbow
+              << ", hook/swing depth=" << hookContact.leadHandDepth << "/"
+              << swingContact.leadHandDepth << '\n';
+}
+
+void TestKickPoseMathematics()
+{
+    using namespace besktop;
+    constexpr double planeSide = 48.0;
+    constexpr double thighLength = planeSide * 0.40;
+    constexpr double shinLength = planeSide * 0.41;
+    const ActionId kicks[] = {
+        ActionId::FrontKick,
+        ActionId::RoundhouseKick,
+        ActionId::SpinningBackKick,
+    };
+    double maximumSupportDrift = 0.0;
+    double maximumProjectedSupportDrift = 0.0;
+    for (const ActionId id : kicks) {
+        const ActionClip& clip = GetActionClip(id);
+        const GaitVec3 plantedSupport = SolveSideKickLeg(
+            SampleAction(clip, 0.0, 1.0), false, 1.0, planeSide).end;
+        for (const double time : {clip.prepareEnd * 0.9,
+                (clip.activeEnd + clip.contactEnd) * 0.5,
+                (clip.contactEnd + clip.recoverEnd) * 0.5}) {
+            const ActionSample sample = SampleAction(clip, time, 1.0);
+            const TwoBoneIkSolution kickLeg = SolveSideKickLeg(sample, true, 1.0, planeSide);
+            const TwoBoneIkSolution supportLeg = SolveSideKickLeg(sample, false, 1.0, planeSide);
+            maximumSupportDrift = std::max(
+                maximumSupportDrift, Distance(plantedSupport, supportLeg.end));
+            const GaitVec3 projectedSupport = RotateAroundVerticalAxis(
+                supportLeg.end, sample.lowerBodyRotateY);
+            maximumProjectedSupportDrift = std::max(
+                maximumProjectedSupportDrift, Distance(plantedSupport, projectedSupport));
+            Check(std::abs(Distance(kickLeg.root, kickLeg.joint) - thighLength) < 1e-6,
+                "new kick thigh keeps fixed length");
+            Check(std::abs(Distance(kickLeg.joint, kickLeg.end) - shinLength) < 1e-6,
+                "new kick shin keeps fixed length");
+            const double knee = JointInteriorAngleDegrees(kickLeg);
+            Check(knee > 35.0 && knee < 178.0,
+                "new kick knee does not reverse or lock");
+        }
+    }
+    Check(maximumSupportDrift <= planeSide * 0.005,
+        "new kicks keep the support foot planted in local action space");
+    Check(maximumProjectedSupportDrift <= planeSide * 0.12,
+        "new kick support-foot rotation stays within a bounded visual tolerance");
+
+    const ActionSample frontPrepare = SampleAction(GetActionClip(ActionId::FrontKick), 0.18, 1.0);
+    const ActionSample frontContact = SampleAction(GetActionClip(ActionId::FrontKick), 0.38, 1.0);
+    const double frontPrepareKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(frontPrepare, true, 1.0, planeSide));
+    const double frontContactKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(frontContact, true, 1.0, planeSide));
+    Check(frontPrepareKnee >= 80.0 && frontPrepareKnee <= 145.0,
+        "front kick chambers before extension");
+    Check(frontContactKnee >= 155.0 && frontContactKnee <= 176.0,
+        "front kick extends without locking");
+
+    const ActionSample sideContact = SampleAction(GetActionClip(ActionId::SideKick), 0.38, 1.0);
+    const ActionSample roundContact = SampleAction(GetActionClip(ActionId::RoundhouseKick), 0.46, 1.0);
+    Check(std::abs(frontContact.leadFootDepthOffset - sideContact.leadFootDepthOffset) >= 0.015,
+        "front and side kick foot directions are distinct");
+    Check(std::abs(roundContact.leadFootDepthOffset) >
+        std::abs(frontContact.leadFootDepthOffset) + 0.25,
+        "roundhouse has a larger depth sweep than front kick");
+
+    const ActionClip& spinClip = GetActionClip(ActionId::SpinningBackKick);
+    double maximumSpinYaw = 0.0;
+    bool crossedSideOn = false;
+    for (int step = 0; step <= 60; ++step) {
+        const double time = spinClip.duration * static_cast<double>(step) / 60.0;
+        const double yaw = SampleAction(spinClip, time, 1.0).bodyRotateY;
+        maximumSpinYaw = std::max(maximumSpinYaw, yaw);
+        if (yaw >= (kPi * 0.45) && yaw <= (kPi * 0.55)) {
+            crossedSideOn = true;
+        }
+    }
+    Check(crossedSideOn, "spinning back kick yaw crosses near 90 degrees continuously");
+    Check(maximumSpinYaw > kPi * 1.9, "spinning back kick completes a full internal turn");
+    Check(std::abs(SampleAction(spinClip, spinClip.duration, 1.0).bodyRotateY) < 1e-9,
+        "spinning back kick returns action yaw to neutral");
+
+    std::cout << "kick metrics: front knee=" << frontPrepareKnee << "->" << frontContactKnee
+              << ", depth front/side/round=" << frontContact.leadFootDepthOffset << "/"
+              << sideContact.leadFootDepthOffset << "/" << roundContact.leadFootDepthOffset
+              << ", support drift=" << maximumSupportDrift
+              << ", projected support drift=" << maximumProjectedSupportDrift
+              << ", max spin yaw=" << maximumSpinYaw * 180.0 / kPi << '\n';
+}
+
+void TestDefenseAndFeedbackMathematics()
+{
+    using namespace besktop;
+    const ActionSample slipLeft = SampleAction(GetActionClip(ActionId::SlipLeft), 0.29, 1.0);
+    const ActionSample slipRight = SampleAction(GetActionClip(ActionId::SlipRight), 0.29, 1.0);
+    Check(std::abs(slipLeft.rootOffsetLateral + slipRight.rootOffsetLateral) < 1e-9 &&
+        std::abs(slipLeft.bodyRotateZ + slipRight.bodyRotateZ) < 1e-9,
+        "left and right slips mirror spatial channels");
+    Check(std::abs(slipLeft.rootOffsetForward) < 1e-9 &&
+        std::abs(slipRight.rootOffsetForward) < 1e-9,
+        "slips avoid forward root motion");
+
+    const ActionSample parry = SampleAction(GetActionClip(ActionId::Parry), 0.25, 1.0);
+    Check(parry.leadHandTargetEnabled && parry.leadHandDepth > 0.35 &&
+        parry.leadHandForward < 0.25,
+        "parry uses a compact outward lead-arm target");
+
+    const ActionClip& lightClip = GetActionClip(ActionId::LightHitReact);
+    const ActionClip& heavyClip = GetActionClip(ActionId::HeavyStagger);
+    const ActionSample light = SampleAction(lightClip, 0.18, 1.0);
+    const ActionSample heavy = SampleAction(heavyClip, 0.34, 1.0);
+    Check(heavyClip.duration > lightClip.duration + 0.40,
+        "heavy stagger lasts clearly longer than light hit react");
+    Check(std::abs(heavy.rootOffsetForward) > std::abs(light.rootOffsetForward) + 0.10 &&
+        std::abs(heavy.bodyRotateZ) > std::abs(light.bodyRotateZ) + 0.10,
+        "heavy stagger has more displacement and rotation than light reaction");
+
+    const ActionClip& whiffClip = GetActionClip(ActionId::WhiffRecovery);
+    const ActionClip& leadClip = GetActionClip(ActionId::LeadStraight);
+    Check((whiffClip.recoverEnd - whiffClip.contactEnd) >
+        (leadClip.recoverEnd - leadClip.contactEnd) + 0.15,
+        "whiff recovery is longer than a compact punch recovery");
+    const ActionSample whiff = SampleAction(whiffClip, 0.33, 1.0);
+    Check(whiff.whiffRecoveryStrength > 0.5 && whiff.rootOffsetForward > 0.08,
+        "whiff recovery exposes overextension channels");
+}
+
 void TestMirroringKeepsTimeline()
 {
     using namespace besktop;
-    ActionPlayer right;
-    ActionPlayer left;
-    right.Start(ActionId::LightHitReact, 1.0);
-    left.Start(ActionId::LightHitReact, -1.0);
-    right.Update(0.16);
-    left.Update(0.16);
-    Check(right.State().phase == left.State().phase, "mirror phase matches");
-    Check(std::abs(right.State().localTimeSeconds - left.State().localTimeSeconds) < 1e-9, "mirror time matches");
-    Check(right.ConsumeEvents() == left.ConsumeEvents(), "mirror event time matches");
-    const ActionSample rightSample = right.Sample();
-    const ActionSample leftSample = left.Sample();
-    Check(std::abs(rightSample.bodyRotateZ + leftSample.bodyRotateZ) < 1e-9, "mirror body rotation");
+    const ActionId actions[] = {
+        ActionId::SwingPunch,
+        ActionId::LeadStraight,
+        ActionId::RearStraight,
+        ActionId::Hook,
+        ActionId::Uppercut,
+        ActionId::FrontKick,
+        ActionId::SideKick,
+        ActionId::RoundhouseKick,
+        ActionId::SpinningBackKick,
+        ActionId::Layback,
+        ActionId::SlipLeft,
+        ActionId::SlipRight,
+        ActionId::Parry,
+        ActionId::LightHitReact,
+        ActionId::HeavyStagger,
+        ActionId::WhiffRecovery,
+    };
+    for (const ActionId id : actions) {
+        const ActionClip& clip = GetActionClip(id);
+        ActionPlayer right;
+        ActionPlayer left;
+        right.Start(id, 1.0);
+        left.Start(id, -1.0);
+        const double sampleTime = (clip.activeEnd + clip.contactEnd) * 0.5;
+        right.Update(sampleTime);
+        left.Update(sampleTime);
+        Check(right.State().phase == left.State().phase, "mirror phase matches");
+        Check(std::abs(right.State().localTimeSeconds - left.State().localTimeSeconds) < 1e-9,
+            "mirror time matches");
+        Check(right.ConsumeEvents() == left.ConsumeEvents(), "mirror event time matches");
+        const ActionSample rightSample = right.Sample();
+        const ActionSample leftSample = left.Sample();
+        Check(std::abs(std::abs(rightSample.bodyRotateY) - std::abs(leftSample.bodyRotateY)) < 1e-9 &&
+            std::abs(std::abs(rightSample.bodyRotateZ) - std::abs(leftSample.bodyRotateZ)) < 1e-9,
+            "mirror keeps body rotation magnitudes");
+        Check(std::abs(rightSample.rootOffsetForward - leftSample.rootOffsetForward) < 1e-9 &&
+            std::abs(rightSample.rootOffsetY - leftSample.rootOffsetY) < 1e-9,
+            "mirror keeps root timing and magnitude channels");
+    }
 }
 
 void TestTurnMotionStateAndGeometry()
@@ -678,6 +1084,10 @@ int main()
     TestPhaseBoundaries();
     TestSkippedContactIsConsumedOnce();
     TestLoopCanEmitAgain();
+    TestActionMetadataAndDefenseWindows();
+    TestPunchPoseMathematics();
+    TestKickPoseMathematics();
+    TestDefenseAndFeedbackMathematics();
     TestMirroringKeepsTimeline();
     TestSideKickGeometryAndEvents();
     TestGaitGeometry();
