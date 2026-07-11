@@ -175,7 +175,7 @@ packs/
 
 视觉 MVP 阶段需要保留可关闭的性能诊断能力：
 
-- `BESKTOP_FRAME_STATS=1`：每秒记录 `paint fps`、`timer fps`、`timer avg/max ms`、`paint avg/max ms`，用于确认实际帧率和渲染耗时。
+- `BESKTOP_FRAME_STATS=1`：每秒记录 `paint fps`、`timer fps`、`timer avg/max ms`、`paint avg/max ms`，并细分缓冲准备、静态背景复制、壁纸、任务栏、演员姿态/投影准备、四肢、图标主体、文字和最终 BitBlt，用于确认实际帧率与热点；Release 仍须先启用诊断总开关。
 - `BESKTOP_FRAME_TRACE=1`：记录首帧绘制、壁纸缓存和关键渲染阶段，用于定位首帧卡顿或异常。
 - `BESKTOP_ANIMATION_SPEED=<倍率>`：控制动画时间倍率，默认 `1.0`，建议允许慢放观察动作细节。
 - `BESKTOP_ANIMATION_OFFSET=<秒>`：设置动画起始偏移，默认 `0.0`，用于直接观察左走、右走、转身、拳击等指定阶段。

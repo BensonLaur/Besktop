@@ -18,6 +18,23 @@ constexpr double kAwakeningStartSeconds = 0.30;
 constexpr double kAwakeningDurationSeconds = 0.48;
 constexpr double kLimbGrowthDurationSeconds = 0.72;
 
+LONGLONG PerformanceCounterNow()
+{
+    LARGE_INTEGER value{};
+    QueryPerformanceCounter(&value);
+    return value.QuadPart;
+}
+
+double CounterMilliseconds(LONGLONG start, LONGLONG end)
+{
+    static const double countsPerMillisecond = [] {
+        LARGE_INTEGER frequency{};
+        QueryPerformanceFrequency(&frequency);
+        return static_cast<double>(frequency.QuadPart) / 1000.0;
+    }();
+    return countsPerMillisecond > 0.0 ? static_cast<double>(end - start) / countsPerMillisecond : 0.0;
+}
+
 double Clamp01(double value)
 {
     return std::clamp(value, 0.0, 1.0);
@@ -177,32 +194,51 @@ void DrawDesktopIconLabel(
     graphics.DrawString(text.c_str(), -1, &font, adjustedRect, &format, &textBrush);
 }
 
-struct ActorPose {
-    enum class Heading {
-        MoveRight,
-        MoveLeft,
-        FacingOut,
-    };
-
-    double x = 0.0;
-    double y = 0.0;
-    double bob = 0.0;
-    double bodyEffect = 0.0;
-    double rotateX = 0.0;
-    double rotateY = 0.0;
-    double rotateZ = 0.0;
-    double facing = 1.0;
-    double punch = 0.0;
-    double kick = 0.0;
-    double dodge = 0.0;
-    double hit = 0.0;
-    double limbGrow = 0.0;
-    double labelAlpha = 1.0;
-    double gait = 0.0;
-    double walkPhase = 0.0;
-    Heading heading = Heading::MoveRight;
-    bool attackingRight = true;
+struct CachedLabelBitmap {
+    std::unique_ptr<Gdiplus::Bitmap> bitmap;
+    float offsetX = 0.0f;
+    float offsetY = 0.0f;
 };
+
+CachedLabelBitmap BuildCachedLabelBitmap(const besktop::IconFightScene::IconActor& actor)
+{
+    CachedLabelBitmap cached;
+    const float originalWidth = static_cast<float>(actor.labelBounds.right - actor.labelBounds.left);
+    const float originalHeight = static_cast<float>(actor.labelBounds.bottom - actor.labelBounds.top);
+    if (actor.label.empty() || originalWidth <= 1.0f || originalHeight <= 1.0f) {
+        return cached;
+    }
+
+    const float bitmapWidth = actor.label.size() <= 3 ? std::max(72.0f, originalWidth) : originalWidth;
+    const float bitmapHeight = originalHeight + 5.0f;
+    auto bitmap = std::make_unique<Gdiplus::Bitmap>(
+        static_cast<INT>(std::ceil(bitmapWidth)),
+        static_cast<INT>(std::ceil(bitmapHeight)),
+        PixelFormat32bppARGB);
+    if (bitmap->GetLastStatus() != Gdiplus::Ok) {
+        return cached;
+    }
+
+    Gdiplus::Graphics graphics(bitmap.get());
+    if (graphics.GetLastStatus() != Gdiplus::Ok) {
+        return cached;
+    }
+    graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
+    const float centeredX = (bitmapWidth - originalWidth) * 0.5f;
+    DrawDesktopIconLabel(
+        graphics,
+        actor.label,
+        Gdiplus::RectF(centeredX, 2.0f, originalWidth, originalHeight),
+        1.0);
+    cached.offsetX = -centeredX;
+    cached.offsetY = -2.0f;
+    cached.bitmap = std::move(bitmap);
+    return cached;
+}
+
+using ActorPose = besktop::IconFightScene::ActorPose;
 
 enum class LimbLayer {
     Back,
@@ -821,28 +857,33 @@ void DrawJointChain(
     Gdiplus::Pen& limb)
 {
     if (shadow != nullptr) {
-        const Gdiplus::PointF shadowRoot = ShadowPoint(chain.root);
-        const Gdiplus::PointF shadowJoint = ShadowPoint(chain.joint);
-        const Gdiplus::PointF shadowEnd = ShadowPoint(chain.end);
-        graphics.DrawLine(shadow, shadowRoot, shadowJoint);
-        graphics.DrawLine(shadow, shadowJoint, shadowEnd);
+        const Gdiplus::PointF shadowPoints[] = {
+            ShadowPoint(chain.root),
+            ShadowPoint(chain.joint),
+            ShadowPoint(chain.end),
+        };
+        graphics.DrawLines(shadow, shadowPoints, static_cast<INT>(std::size(shadowPoints)));
     }
-    graphics.DrawLine(&limb, chain.root, chain.joint);
-    graphics.DrawLine(&limb, chain.joint, chain.end);
+    const Gdiplus::PointF points[] = {
+        chain.root,
+        chain.joint,
+        chain.end,
+    };
+    graphics.DrawLines(&limb, points, static_cast<INT>(std::size(points)));
 }
 
 void DrawActorLimbs(
     Gdiplus::Graphics& graphics,
     const besktop::IconFightScene::IconActor& actor,
     const ActorPose& pose,
+    const BodyProjection& body,
+    const LimbPose& limbs,
     LimbLayer layer)
 {
     if (pose.limbGrow <= 0.01) {
         return;
     }
 
-    const BodyProjection body = BuildBodyProjection(actor, pose);
-    const LimbPose limbs = BuildLimbPose(actor, pose);
     const double alphaCeiling = layer == LimbLayer::Front ? 248.0 : 178.0;
     const double alphaValue = alphaCeiling * pose.limbGrow;
     const unsigned char alpha = static_cast<unsigned char>(std::clamp(alphaValue, 0.0, 255.0));
@@ -929,10 +970,6 @@ bool DrawActorIconBody(
     };
     const Gdiplus::PointF* destination = frontFace ? frontDestination : backDestination;
 
-    const Gdiplus::InterpolationMode previousInterpolation = graphics.GetInterpolationMode();
-    const Gdiplus::PixelOffsetMode previousPixelOffset = graphics.GetPixelOffsetMode();
-    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
     const Gdiplus::Status drawStatus = graphics.DrawImage(
         bitmap,
         destination,
@@ -942,9 +979,6 @@ bool DrawActorIconBody(
         static_cast<Gdiplus::REAL>(actor.iconImage->width),
         static_cast<Gdiplus::REAL>(actor.iconImage->height),
         Gdiplus::UnitPixel);
-    graphics.SetInterpolationMode(previousInterpolation);
-    graphics.SetPixelOffsetMode(previousPixelOffset);
-
     if (drawStatus != Gdiplus::Ok) {
         return false;
     }
@@ -964,10 +998,12 @@ bool DrawActorIconBody(
     return true;
 }
 
-void DrawActorBody(Gdiplus::Graphics& graphics, const besktop::IconFightScene::IconActor& actor, const ActorPose& pose)
+void DrawActorBody(
+    Gdiplus::Graphics& graphics,
+    const besktop::IconFightScene::IconActor& actor,
+    const ActorPose& pose,
+    const BodyProjection& body)
 {
-    const BodyProjection body = BuildBodyProjection(actor, pose);
-
     if (DrawActorIconBody(graphics, actor, pose, body.points, body.shadowPoints, std::size(body.points))) {
         return;
     }
@@ -1013,6 +1049,8 @@ void DrawActorLabel(
     Gdiplus::Graphics& graphics,
     const besktop::IconFightScene::IconActor& actor,
     const ActorPose& pose,
+    const BodyProjection& body,
+    const CachedLabelBitmap* cachedLabel,
     double elapsedSeconds)
 {
     if (pose.labelAlpha <= 0.02) {
@@ -1022,7 +1060,34 @@ void DrawActorLabel(
     const double shake = SmoothStep(0.30, 0.82, elapsedSeconds) * (1.0 - SmoothStep(1.08, 1.48, elapsedSeconds));
     const double jitterX = std::sin((elapsedSeconds * 66.0) + actor.role) * 5.0 * shake;
     const double jitterY = std::cos((elapsedSeconds * 73.0) + actor.role) * 3.0 * shake;
-    const BodyProjection body = BuildBodyProjection(actor, pose);
+    if (cachedLabel != nullptr && cachedLabel->bitmap != nullptr) {
+        Gdiplus::ColorMatrix alphaMatrix = {
+            1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, static_cast<float>(pose.labelAlpha), 0.0f,
+            0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+        };
+        Gdiplus::ImageAttributes attributes;
+        attributes.SetColorMatrix(&alphaMatrix, Gdiplus::ColorMatrixFlagsDefault, Gdiplus::ColorAdjustTypeBitmap);
+        const INT width = static_cast<INT>(cachedLabel->bitmap->GetWidth());
+        const INT height = static_cast<INT>(cachedLabel->bitmap->GetHeight());
+        graphics.DrawImage(
+            cachedLabel->bitmap.get(),
+            Gdiplus::Rect(
+                static_cast<INT>(std::lround(actor.labelBounds.left + jitterX + cachedLabel->offsetX)),
+                static_cast<INT>(std::lround(actor.labelBounds.top + jitterY + cachedLabel->offsetY)),
+                width,
+                height),
+            0,
+            0,
+            width,
+            height,
+            Gdiplus::UnitPixel,
+            &attributes);
+        return;
+    }
+
     const Gdiplus::RectF bodyBounds = BoundsForPoints(body.points, std::size(body.points));
 
     Gdiplus::RectF labelRect(
@@ -1060,9 +1125,23 @@ const wchar_t* PhaseName(besktop::IconFightScene::ScenePhase phase)
 
 namespace besktop {
 
+struct IconFightScene::RenderCache {
+    std::vector<BodyProjection> bodies;
+    std::vector<LimbPose> limbs;
+    std::vector<CachedLabelBitmap> labels;
+};
+
+IconFightScene::IconFightScene()
+    : renderCache_(std::make_unique<RenderCache>())
+{
+}
+
+IconFightScene::~IconFightScene() = default;
+
 void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRect)
 {
     actors_.clear();
+    poseCache_.clear();
     iconImageCache_.Clear();
     monitorBounds_ = snapshot.monitorBounds;
     clientBounds_ = clientRect;
@@ -1161,6 +1240,14 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
 
     for (IconActor& actor : actors_) {
         ChooseWanderTarget(actor);
+    }
+    poseCache_.resize(actors_.size());
+    renderCache_->bodies.resize(actors_.size());
+    renderCache_->limbs.resize(actors_.size());
+    renderCache_->labels.clear();
+    renderCache_->labels.reserve(actors_.size());
+    for (const IconActor& actor : actors_) {
+        renderCache_->labels.push_back(BuildCachedLabelBitmap(actor));
     }
 
     LogInfo(L"icon fight scene reset; actors: " + std::to_wstring(actors_.size()));
@@ -1300,11 +1387,13 @@ void IconFightScene::ChooseWanderTarget(IconActor& actor)
     actor.targetY = maxY > minY ? minY + (maxY - minY) * nextUnit() : (wanderBounds_.top + wanderBounds_.bottom) * 0.5;
 }
 
-void IconFightScene::Render(HDC hdc, const RECT& clientRect) const
+void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timings) const
 {
     Gdiplus::Graphics graphics(hdc);
     graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
     graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
 
     const double width = clientRect.right - clientRect.left;
     const double height = clientRect.bottom - clientRect.top;
@@ -1323,20 +1412,57 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect) const
             Gdiplus::Color(alpha, 255, 255, 255));
     }
 
-    for (const IconActor& actor : actors_) {
-        const ActorPose pose = BuildPose(actor, elapsedSeconds_);
-        DrawActorLimbs(graphics, actor, pose, LimbLayer::Back);
+    const LONGLONG poseStart = timings != nullptr ? PerformanceCounterNow() : 0;
+    for (size_t index = 0; index < actors_.size(); ++index) {
+        poseCache_[index] = BuildPose(actors_[index], elapsedSeconds_);
+    }
+    const LONGLONG actorPrepStart = timings != nullptr ? PerformanceCounterNow() : 0;
+    for (size_t index = 0; index < actors_.size(); ++index) {
+        renderCache_->bodies[index] = BuildBodyProjection(actors_[index], poseCache_[index]);
+        renderCache_->limbs[index] = BuildLimbPose(actors_[index], poseCache_[index]);
+    }
+    if (timings != nullptr) {
+        const LONGLONG end = PerformanceCounterNow();
+        timings->poseMs = CounterMilliseconds(poseStart, actorPrepStart);
+        timings->actorPrepMs = CounterMilliseconds(actorPrepStart, end);
     }
 
-    for (const IconActor& actor : actors_) {
-        const ActorPose pose = BuildPose(actor, elapsedSeconds_);
-        DrawActorBody(graphics, actor, pose);
-        DrawActorLabel(graphics, actor, pose, elapsedSeconds_);
+    for (size_t index = 0; index < actors_.size(); ++index) {
+        const IconActor& actor = actors_[index];
+        const ActorPose& pose = poseCache_[index];
+        const LONGLONG limbStart = timings != nullptr ? PerformanceCounterNow() : 0;
+        DrawActorLimbs(
+            graphics, actor, pose, renderCache_->bodies[index], renderCache_->limbs[index], LimbLayer::Back);
+        if (timings != nullptr) {
+            const LONGLONG end = PerformanceCounterNow();
+            timings->limbsMs += CounterMilliseconds(limbStart, end);
+        }
+    }
+    for (size_t index = 0; index < actors_.size(); ++index) {
+        const IconActor& actor = actors_[index];
+        const ActorPose& pose = poseCache_[index];
+        const LONGLONG bodyStart = timings != nullptr ? PerformanceCounterNow() : 0;
+        DrawActorBody(graphics, actor, pose, renderCache_->bodies[index]);
+        const LONGLONG labelStart = timings != nullptr ? PerformanceCounterNow() : 0;
+        DrawActorLabel(
+            graphics, actor, pose, renderCache_->bodies[index], &renderCache_->labels[index], elapsedSeconds_);
+        if (timings != nullptr) {
+            const LONGLONG end = PerformanceCounterNow();
+            timings->iconBodyMs += CounterMilliseconds(bodyStart, labelStart);
+            timings->labelMs += CounterMilliseconds(labelStart, end);
+        }
     }
 
-    for (const IconActor& actor : actors_) {
-        const ActorPose pose = BuildPose(actor, elapsedSeconds_);
-        DrawActorLimbs(graphics, actor, pose, LimbLayer::Front);
+    for (size_t index = 0; index < actors_.size(); ++index) {
+        const IconActor& actor = actors_[index];
+        const ActorPose& pose = poseCache_[index];
+        const LONGLONG limbStart = timings != nullptr ? PerformanceCounterNow() : 0;
+        DrawActorLimbs(
+            graphics, actor, pose, renderCache_->bodies[index], renderCache_->limbs[index], LimbLayer::Front);
+        if (timings != nullptr) {
+            const LONGLONG end = PerformanceCounterNow();
+            timings->limbsMs += CounterMilliseconds(limbStart, end);
+        }
     }
 
     Gdiplus::FontFamily fontFamily(L"Microsoft YaHei UI");

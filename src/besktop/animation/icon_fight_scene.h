@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,9 +14,50 @@ namespace besktop {
 
 class IconFightScene {
 public:
+    IconFightScene();
+    ~IconFightScene();
+
+    IconFightScene(const IconFightScene&) = delete;
+    IconFightScene& operator=(const IconFightScene&) = delete;
+
+    struct RenderTimings {
+        double poseMs = 0.0;
+        double actorPrepMs = 0.0;
+        double limbsMs = 0.0;
+        double iconBodyMs = 0.0;
+        double labelMs = 0.0;
+    };
+
+    struct ActorPose {
+        enum class Heading {
+            MoveRight,
+            MoveLeft,
+            FacingOut,
+        };
+
+        double x = 0.0;
+        double y = 0.0;
+        double bob = 0.0;
+        double bodyEffect = 0.0;
+        double rotateX = 0.0;
+        double rotateY = 0.0;
+        double rotateZ = 0.0;
+        double facing = 1.0;
+        double punch = 0.0;
+        double kick = 0.0;
+        double dodge = 0.0;
+        double hit = 0.0;
+        double limbGrow = 0.0;
+        double labelAlpha = 1.0;
+        double gait = 0.0;
+        double walkPhase = 0.0;
+        Heading heading = Heading::MoveRight;
+        bool attackingRight = true;
+    };
+
     void Reset(const DesktopSnapshot& snapshot, const RECT& clientRect);
     void Update(double elapsedSeconds);
-    void Render(HDC hdc, const RECT& clientRect) const;
+    void Render(HDC hdc, const RECT& clientRect, RenderTimings* timings = nullptr) const;
 
     // Public for the small free functions in the implementation file; this is
     // still an internal scene type, not a plugin-facing API.
@@ -58,11 +100,14 @@ public:
     };
 
 private:
+    struct RenderCache;
     ScenePhase DeterminePhase(double elapsedSeconds) const;
     void LogPhase(ScenePhase phase);
     void ChooseWanderTarget(IconActor& actor);
 
     std::vector<IconActor> actors_;
+    mutable std::vector<ActorPose> poseCache_;
+    std::unique_ptr<RenderCache> renderCache_;
     IconImageCache iconImageCache_;
     RECT monitorBounds_{};
     RECT clientBounds_{};

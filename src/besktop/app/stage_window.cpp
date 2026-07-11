@@ -83,6 +83,23 @@ HICON LoadApplicationIcon(HINSTANCE instance, int width, int height)
         LR_DEFAULTCOLOR | LR_SHARED));
 }
 
+LONGLONG PerformanceCounterNow()
+{
+    LARGE_INTEGER value{};
+    QueryPerformanceCounter(&value);
+    return value.QuadPart;
+}
+
+double CounterMilliseconds(LONGLONG start, LONGLONG end)
+{
+    static const double countsPerMillisecond = [] {
+        LARGE_INTEGER frequency{};
+        QueryPerformanceFrequency(&frequency);
+        return static_cast<double>(frequency.QuadPart) / 1000.0;
+    }();
+    return countsPerMillisecond > 0.0 ? static_cast<double>(end - start) / countsPerMillisecond : 0.0;
+}
+
 } // namespace
 
 namespace besktop {
@@ -90,6 +107,7 @@ namespace besktop {
 class StageWindow {
 public:
     StageWindow(HINSTANCE instance, const RuntimeOptions& options);
+    ~StageWindow();
 
     StageWindow(const StageWindow&) = delete;
     StageWindow& operator=(const StageWindow&) = delete;
@@ -97,15 +115,32 @@ public:
     int Run(int showCommand);
 
 private:
+    struct FrameTimings {
+        double bufferPrepareMs = 0.0;
+        double backgroundCopyMs = 0.0;
+        double wallpaperMs = 0.0;
+        double taskbarMs = 0.0;
+        double poseMs = 0.0;
+        double actorPrepMs = 0.0;
+        double limbsMs = 0.0;
+        double iconBodyMs = 0.0;
+        double labelMs = 0.0;
+        double finalBltMs = 0.0;
+        double totalMs = 0.0;
+    };
+
     bool Create(int showCommand);
     void Close();
     void Paint();
+    bool EnsureRenderBuffers(HDC referenceHdc, int width, int height);
+    bool EnsureStaticBackground(const RECT& clientRect, FrameTimings& timings);
+    void ResetRenderBuffers();
     void RegisterForceExitHotkey();
     void UnregisterForceExitHotkey();
     void LogSnapshot() const;
     void ResetFrameStats(ULONGLONG now);
     void RecordTimerTick(ULONGLONG now);
-    void RecordPaintFrame(ULONGLONG startTick, ULONGLONG endTick);
+    void RecordPaintFrame(const FrameTimings& timings);
     void LogFrameStatsIfDue(ULONGLONG now);
 
     LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
@@ -129,17 +164,31 @@ private:
     ULONGLONG lastTimerTick_ = 0;
     ULONGLONG totalTimerDeltaMs_ = 0;
     ULONGLONG maxTimerDeltaMs_ = 0;
-    ULONGLONG totalPaintMs_ = 0;
-    ULONGLONG maxPaintMs_ = 0;
+    double totalPaintMs_ = 0.0;
+    double maxPaintMs_ = 0.0;
+    FrameTimings totalStageTimings_{};
     unsigned int timerTickCount_ = 0;
     unsigned int timerDeltaCount_ = 0;
     unsigned int paintFrameCount_ = 0;
+    HDC bufferHdc_ = nullptr;
+    HBITMAP bufferBitmap_ = nullptr;
+    HGDIOBJ previousBufferBitmap_ = nullptr;
+    HDC staticBackgroundHdc_ = nullptr;
+    HBITMAP staticBackgroundBitmap_ = nullptr;
+    HGDIOBJ previousStaticBackgroundBitmap_ = nullptr;
+    SIZE renderBufferSize_{};
+    bool staticBackgroundReady_ = false;
 };
 
 StageWindow::StageWindow(HINSTANCE instance, const RuntimeOptions& options)
     : instance_(instance),
       options_(options)
 {
+}
+
+StageWindow::~StageWindow()
+{
+    ResetRenderBuffers();
 }
 
 int RunStageWindow(HINSTANCE instance, int showCommand, const RuntimeOptions& options)
@@ -281,7 +330,8 @@ void StageWindow::Close()
 
 void StageWindow::Paint()
 {
-    const ULONGLONG paintStartTick = GetTickCount64();
+    const LONGLONG paintStartCounter = PerformanceCounterNow();
+    FrameTimings timings;
     const bool traceFirstPaint = options_.frameTraceEnabled && !firstPaintTraceLogged_;
     if (traceFirstPaint) {
         firstPaintTraceLogged_ = true;
@@ -299,28 +349,139 @@ void StageWindow::Paint()
         return;
     }
 
-    HDC bufferHdc = CreateCompatibleDC(paintHdc);
-    HBITMAP bufferBitmap = CreateCompatibleBitmap(paintHdc, width, height);
-    HGDIOBJ previousBitmap = nullptr;
+    const LONGLONG bufferStart = PerformanceCounterNow();
+    const bool bufferReady = EnsureRenderBuffers(paintHdc, width, height);
     HDC renderHdc = paintHdc;
-    if (bufferHdc != nullptr && bufferBitmap != nullptr) {
-        previousBitmap = SelectObject(bufferHdc, bufferBitmap);
-        renderHdc = bufferHdc;
+    if (bufferReady) {
+        renderHdc = bufferHdc_;
     }
+    timings.bufferPrepareMs = CounterMilliseconds(bufferStart, PerformanceCounterNow());
     if (traceFirstPaint) {
         LogInfo(L"paint trace: double buffer ready");
     }
 
+    bool backgroundCopied = false;
+    if (EnsureStaticBackground(clientRect, timings) && staticBackgroundHdc_ != nullptr) {
+        const LONGLONG backgroundStart = PerformanceCounterNow();
+        backgroundCopied = BitBlt(
+            renderHdc, 0, 0, width, height, staticBackgroundHdc_, 0, 0, SRCCOPY) != FALSE;
+        timings.backgroundCopyMs += CounterMilliseconds(backgroundStart, PerformanceCounterNow());
+    }
+    if (!backgroundCopied) {
+        const LONGLONG backgroundStart = PerformanceCounterNow();
+        HBRUSH backgroundBrush = CreateSolidBrush(RGB(10, 12, 16));
+        FillRect(renderHdc, &clientRect, backgroundBrush);
+        DeleteObject(backgroundBrush);
+        timings.backgroundCopyMs += CounterMilliseconds(backgroundStart, PerformanceCounterNow());
+
+        const LONGLONG wallpaperStart = PerformanceCounterNow();
+        wallpaperRenderer_.Draw(renderHdc, clientRect, snapshot_.wallpaper);
+        timings.wallpaperMs += CounterMilliseconds(wallpaperStart, PerformanceCounterNow());
+
+        const LONGLONG taskbarStart = PerformanceCounterNow();
+        taskbarRenderer_.Draw(renderHdc, clientRect, snapshot_);
+        timings.taskbarMs += CounterMilliseconds(taskbarStart, PerformanceCounterNow());
+    }
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: taskbar rendered");
+    }
+
+    IconFightScene::RenderTimings sceneTimings;
+    scene_.Render(renderHdc, clientRect, options_.frameStatsEnabled ? &sceneTimings : nullptr);
+    timings.poseMs = sceneTimings.poseMs;
+    timings.actorPrepMs = sceneTimings.actorPrepMs;
+    timings.limbsMs = sceneTimings.limbsMs;
+    timings.iconBodyMs = sceneTimings.iconBodyMs;
+    timings.labelMs = sceneTimings.labelMs;
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: scene rendered");
+    }
+
+    if (renderHdc == bufferHdc_) {
+        const LONGLONG bltStart = PerformanceCounterNow();
+        BitBlt(paintHdc, 0, 0, width, height, bufferHdc_, 0, 0, SRCCOPY);
+        timings.finalBltMs = CounterMilliseconds(bltStart, PerformanceCounterNow());
+    }
+    if (traceFirstPaint) {
+        LogInfo(L"paint trace: buffer copied");
+    }
+    EndPaint(hwnd_, &paint);
+    timings.totalMs = CounterMilliseconds(paintStartCounter, PerformanceCounterNow());
+    RecordPaintFrame(timings);
+}
+
+bool StageWindow::EnsureRenderBuffers(HDC referenceHdc, int width, int height)
+{
+    if (bufferHdc_ != nullptr && bufferBitmap_ != nullptr &&
+        renderBufferSize_.cx == width && renderBufferSize_.cy == height) {
+        return true;
+    }
+
+    ResetRenderBuffers();
+    bufferHdc_ = CreateCompatibleDC(referenceHdc);
+    bufferBitmap_ = CreateCompatibleBitmap(referenceHdc, width, height);
+    if (bufferHdc_ == nullptr || bufferBitmap_ == nullptr) {
+        ResetRenderBuffers();
+        LogWarning(L"persistent render buffer unavailable; using direct paint fallback");
+        return false;
+    }
+    previousBufferBitmap_ = SelectObject(bufferHdc_, bufferBitmap_);
+    if (previousBufferBitmap_ == nullptr || previousBufferBitmap_ == HGDI_ERROR) {
+        ResetRenderBuffers();
+        LogWarning(L"persistent render buffer selection failed; using direct paint fallback");
+        return false;
+    }
+
+    staticBackgroundHdc_ = CreateCompatibleDC(referenceHdc);
+    staticBackgroundBitmap_ = CreateCompatibleBitmap(referenceHdc, width, height);
+    if (staticBackgroundHdc_ != nullptr && staticBackgroundBitmap_ != nullptr) {
+        previousStaticBackgroundBitmap_ = SelectObject(staticBackgroundHdc_, staticBackgroundBitmap_);
+        if (previousStaticBackgroundBitmap_ == nullptr || previousStaticBackgroundBitmap_ == HGDI_ERROR) {
+            if (staticBackgroundBitmap_ != nullptr) {
+                DeleteObject(staticBackgroundBitmap_);
+                staticBackgroundBitmap_ = nullptr;
+            }
+            if (staticBackgroundHdc_ != nullptr) {
+                DeleteDC(staticBackgroundHdc_);
+                staticBackgroundHdc_ = nullptr;
+            }
+            previousStaticBackgroundBitmap_ = nullptr;
+        }
+    } else {
+        if (staticBackgroundBitmap_ != nullptr) {
+            DeleteObject(staticBackgroundBitmap_);
+            staticBackgroundBitmap_ = nullptr;
+        }
+        if (staticBackgroundHdc_ != nullptr) {
+            DeleteDC(staticBackgroundHdc_);
+            staticBackgroundHdc_ = nullptr;
+        }
+    }
+
+    renderBufferSize_.cx = width;
+    renderBufferSize_.cy = height;
+    staticBackgroundReady_ = false;
+    return true;
+}
+
+bool StageWindow::EnsureStaticBackground(const RECT& clientRect, FrameTimings& timings)
+{
+    if (staticBackgroundReady_) {
+        return true;
+    }
+    if (staticBackgroundHdc_ == nullptr || staticBackgroundBitmap_ == nullptr) {
+        return false;
+    }
+
+    const LONGLONG backgroundStart = PerformanceCounterNow();
     HBRUSH backgroundBrush = CreateSolidBrush(RGB(10, 12, 16));
-    FillRect(renderHdc, &clientRect, backgroundBrush);
+    FillRect(staticBackgroundHdc_, &clientRect, backgroundBrush);
     DeleteObject(backgroundBrush);
-    if (traceFirstPaint) {
-        LogInfo(L"paint trace: background filled");
-    }
-    const bool wallpaperDrawn = wallpaperRenderer_.Draw(renderHdc, clientRect, snapshot_.wallpaper);
-    if (traceFirstPaint) {
-        LogInfo(L"paint trace: wallpaper draw returned");
-    }
+    timings.backgroundCopyMs += CounterMilliseconds(backgroundStart, PerformanceCounterNow());
+
+    const LONGLONG wallpaperStart = PerformanceCounterNow();
+    const bool wallpaperDrawn = wallpaperRenderer_.Draw(staticBackgroundHdc_, clientRect, snapshot_.wallpaper);
+    timings.wallpaperMs += CounterMilliseconds(wallpaperStart, PerformanceCounterNow());
     if (!wallpaperDrawLogged_) {
         wallpaperDrawLogged_ = true;
         if (wallpaperDrawn) {
@@ -330,7 +491,9 @@ void StageWindow::Paint()
         }
     }
 
-    const bool taskbarDrawn = taskbarRenderer_.Draw(renderHdc, clientRect, snapshot_);
+    const LONGLONG taskbarStart = PerformanceCounterNow();
+    const bool taskbarDrawn = taskbarRenderer_.Draw(staticBackgroundHdc_, clientRect, snapshot_);
+    timings.taskbarMs += CounterMilliseconds(taskbarStart, PerformanceCounterNow());
     if (!taskbarDrawLogged_) {
         taskbarDrawLogged_ = true;
         if (taskbarDrawn) {
@@ -339,33 +502,41 @@ void StageWindow::Paint()
             LogWarning(L"static taskbar draw unavailable; continuing without taskbar pixels");
         }
     }
-    if (traceFirstPaint) {
-        LogInfo(L"paint trace: taskbar rendered");
+
+    staticBackgroundReady_ = true;
+    return true;
+}
+
+void StageWindow::ResetRenderBuffers()
+{
+    staticBackgroundReady_ = false;
+    if (staticBackgroundHdc_ != nullptr && previousStaticBackgroundBitmap_ != nullptr &&
+        previousStaticBackgroundBitmap_ != HGDI_ERROR) {
+        SelectObject(staticBackgroundHdc_, previousStaticBackgroundBitmap_);
+    }
+    previousStaticBackgroundBitmap_ = nullptr;
+    if (staticBackgroundBitmap_ != nullptr) {
+        DeleteObject(staticBackgroundBitmap_);
+        staticBackgroundBitmap_ = nullptr;
+    }
+    if (staticBackgroundHdc_ != nullptr) {
+        DeleteDC(staticBackgroundHdc_);
+        staticBackgroundHdc_ = nullptr;
     }
 
-    scene_.Render(renderHdc, clientRect);
-    if (traceFirstPaint) {
-        LogInfo(L"paint trace: scene rendered");
+    if (bufferHdc_ != nullptr && previousBufferBitmap_ != nullptr && previousBufferBitmap_ != HGDI_ERROR) {
+        SelectObject(bufferHdc_, previousBufferBitmap_);
     }
-
-    if (renderHdc == bufferHdc) {
-        BitBlt(paintHdc, 0, 0, width, height, bufferHdc, 0, 0, SRCCOPY);
+    previousBufferBitmap_ = nullptr;
+    if (bufferBitmap_ != nullptr) {
+        DeleteObject(bufferBitmap_);
+        bufferBitmap_ = nullptr;
     }
-    if (traceFirstPaint) {
-        LogInfo(L"paint trace: buffer copied");
+    if (bufferHdc_ != nullptr) {
+        DeleteDC(bufferHdc_);
+        bufferHdc_ = nullptr;
     }
-    if (previousBitmap != nullptr) {
-        SelectObject(bufferHdc, previousBitmap);
-    }
-    if (bufferBitmap != nullptr) {
-        DeleteObject(bufferBitmap);
-    }
-    if (bufferHdc != nullptr) {
-        DeleteDC(bufferHdc);
-    }
-
-    EndPaint(hwnd_, &paint);
-    RecordPaintFrame(paintStartTick, GetTickCount64());
+    renderBufferSize_ = {};
 }
 
 void StageWindow::RegisterForceExitHotkey()
@@ -494,6 +665,7 @@ void StageWindow::ResetFrameStats(ULONGLONG now)
     maxTimerDeltaMs_ = 0;
     totalPaintMs_ = 0;
     maxPaintMs_ = 0;
+    totalStageTimings_ = {};
     timerTickCount_ = 0;
     timerDeltaCount_ = 0;
     paintFrameCount_ = 0;
@@ -515,17 +687,27 @@ void StageWindow::RecordTimerTick(ULONGLONG now)
     lastTimerTick_ = now;
 }
 
-void StageWindow::RecordPaintFrame(ULONGLONG startTick, ULONGLONG endTick)
+void StageWindow::RecordPaintFrame(const FrameTimings& timings)
 {
     if (!options_.frameStatsEnabled) {
         return;
     }
 
     ++paintFrameCount_;
-    const ULONGLONG durationMs = endTick >= startTick ? endTick - startTick : 0;
-    totalPaintMs_ += durationMs;
-    maxPaintMs_ = std::max(maxPaintMs_, durationMs);
-    LogFrameStatsIfDue(endTick);
+    totalPaintMs_ += std::max(0.0, timings.totalMs);
+    maxPaintMs_ = std::max(maxPaintMs_, timings.totalMs);
+    totalStageTimings_.bufferPrepareMs += timings.bufferPrepareMs;
+    totalStageTimings_.backgroundCopyMs += timings.backgroundCopyMs;
+    totalStageTimings_.wallpaperMs += timings.wallpaperMs;
+    totalStageTimings_.taskbarMs += timings.taskbarMs;
+    totalStageTimings_.poseMs += timings.poseMs;
+    totalStageTimings_.actorPrepMs += timings.actorPrepMs;
+    totalStageTimings_.limbsMs += timings.limbsMs;
+    totalStageTimings_.iconBodyMs += timings.iconBodyMs;
+    totalStageTimings_.labelMs += timings.labelMs;
+    totalStageTimings_.finalBltMs += timings.finalBltMs;
+    totalStageTimings_.totalMs += timings.totalMs;
+    LogFrameStatsIfDue(GetTickCount64());
 }
 
 void StageWindow::LogFrameStatsIfDue(ULONGLONG now)
@@ -566,7 +748,21 @@ void StageWindow::LogFrameStatsIfDue(ULONGLONG now)
         L"; paint avg/max ms=" +
         FormatDouble(avgPaintMs, 1) +
         L"/" +
-        std::to_wstring(maxPaintMs_));
+        FormatDouble(maxPaintMs_, 1));
+
+    const double frameDivisor = paintFrameCount_ > 0 ? static_cast<double>(paintFrameCount_) : 1.0;
+    LogInfo(
+        L"frame stages avg ms: buffer=" + FormatDouble(totalStageTimings_.bufferPrepareMs / frameDivisor, 2) +
+        L"; background=" + FormatDouble(totalStageTimings_.backgroundCopyMs / frameDivisor, 2) +
+        L"; wallpaper=" + FormatDouble(totalStageTimings_.wallpaperMs / frameDivisor, 2) +
+        L"; taskbar=" + FormatDouble(totalStageTimings_.taskbarMs / frameDivisor, 2) +
+        L"; pose=" + FormatDouble(totalStageTimings_.poseMs / frameDivisor, 2) +
+        L"; actor prep=" + FormatDouble(totalStageTimings_.actorPrepMs / frameDivisor, 2) +
+        L"; limbs=" + FormatDouble(totalStageTimings_.limbsMs / frameDivisor, 2) +
+        L"; icon=" + FormatDouble(totalStageTimings_.iconBodyMs / frameDivisor, 2) +
+        L"; label=" + FormatDouble(totalStageTimings_.labelMs / frameDivisor, 2) +
+        L"; final blt=" + FormatDouble(totalStageTimings_.finalBltMs / frameDivisor, 2) +
+        L"; total=" + FormatDouble(totalStageTimings_.totalMs / frameDivisor, 2));
 
     ResetFrameStats(now);
 }
@@ -615,6 +811,7 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             LogInfo(L"animation timer stopped");
         }
         UnregisterForceExitHotkey();
+        ResetRenderBuffers();
         LogInfo(L"WM_DESTROY; posting quit message");
         PostQuitMessage(0);
         return 0;

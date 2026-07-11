@@ -212,7 +212,7 @@ $env:BESKTOP_MAX_ACTORS='10'
 
 Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP_ENABLE_DIAGNOSTICS=1`；未设置总开关时，Release 会忽略单项调试变量，并保持 `1.0x` 动画速度、`0` 秒偏移和低噪声 Warning/Error 日志。
 
-- `BESKTOP_FRAME_STATS=1` 用于确认实际帧率和绘制耗时。
+- `BESKTOP_FRAME_STATS=1` 用于确认实际帧率、总绘制耗时，以及缓冲、静态背景、演员姿态、四肢、图标主体、文字和最终 BitBlt 的分阶段耗时。
 - `BESKTOP_FRAME_TRACE=1` 用于定位首帧、壁纸缓存和渲染阶段问题。
 - `BESKTOP_ANIMATION_SPEED` 用于慢放或加速动画，默认 `1.0`。
 - `BESKTOP_ANIMATION_OFFSET` 用于从指定动画秒数开始，减少等待左走、右走、转身、出拳等阶段的时间。

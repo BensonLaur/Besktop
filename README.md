@@ -113,7 +113,7 @@ Icon Fight 的目标不是做复杂游戏，而是做一个“看一眼就想转
 Debug 构建默认允许开发者通过环境变量开启诊断能力：
 
 ```powershell
-$env:BESKTOP_FRAME_STATS='1'      # 每秒记录 paint fps / timer fps / paint avg/max
+$env:BESKTOP_FRAME_STATS='1'      # 每秒记录帧率、总绘制耗时和各渲染阶段平均耗时
 $env:BESKTOP_FRAME_TRACE='1'      # 记录首帧和壁纸缓存的分段 trace
 $env:BESKTOP_ANIMATION_SPEED='0.5' # 0.5 倍速慢放观察动作，默认 1.0
 $env:BESKTOP_ANIMATION_OFFSET='4.5' # 从动画第 4.5 秒开始，便于直接观察某个动作阶段
