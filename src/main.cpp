@@ -98,6 +98,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
     const besktop::RuntimeOptions& options = besktop::GetRuntimeOptions();
     besktop::ConfigureLogging(options.verboseInfoLogging ? besktop::LogLevel::Info : besktop::LogLevel::Warning);
+    if (options.invalidActionPreview) {
+        besktop::LogWarning(L"invalid BESKTOP_ACTION_PREVIEW value; action preview disabled");
+    }
     ConfigureDpiAwareness();
     return besktop::RunStageWindow(instance, showCommand, options);
 }

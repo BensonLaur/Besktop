@@ -39,6 +39,14 @@ add_library(besktop_runtime STATIC
     src/besktop/core/pack_framework.cpp
 )
 
+add_library(besktop_animation STATIC
+    src/besktop/animation/action_clip.cpp
+    src/besktop/animation/action_player.cpp
+)
+
+target_compile_features(besktop_animation PUBLIC cxx_std_20)
+target_include_directories(besktop_animation PUBLIC src)
+
 target_compile_features(besktop_runtime PUBLIC cxx_std_20)
 
 target_include_directories(besktop_runtime PUBLIC
@@ -72,11 +80,20 @@ target_compile_definitions(besktop PRIVATE
 )
 
 target_link_libraries(besktop PRIVATE Comctl32 Gdi32 Gdiplus Ole32 Shell32 User32)
+target_link_libraries(besktop PRIVATE besktop_animation)
 
 add_executable(besktop_mvp_cli
     tools/mvp_cli.cpp
     "${BESKTOP_GENERATED_RESOURCE_FILE}"
 )
+
+add_executable(besktop_action_tests
+    tests/action_player_tests.cpp
+)
+target_link_libraries(besktop_action_tests PRIVATE besktop_animation)
+
+enable_testing()
+add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 
 foreach(target_name IN ITEMS besktop besktop_mvp_cli)
     target_link_libraries(${target_name} PRIVATE besktop_runtime)
@@ -93,5 +110,9 @@ endforeach()
 
 if(MSVC)
     set_property(TARGET besktop_runtime PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_animation PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_action_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()

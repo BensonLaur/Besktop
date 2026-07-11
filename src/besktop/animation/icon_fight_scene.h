@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "besktop/desktop/desktop_snapshot.h"
+#include "besktop/animation/action_player.h"
 #include "besktop/render/icon_image_cache.h"
 
 namespace besktop {
@@ -53,6 +54,7 @@ public:
         double walkPhase = 0.0;
         Heading heading = Heading::MoveRight;
         bool attackingRight = true;
+        ActionSample action{};
     };
 
     void Reset(const DesktopSnapshot& snapshot, const RECT& clientRect);
@@ -97,6 +99,10 @@ public:
         unsigned char blue = 240;
         const IconImage* iconImage = nullptr;
         bool usedIconImageFallback = true;
+        bool actionPreviewActor = false;
+        double actionPreviewPauseRemaining = 0.45;
+        ActionPlayer actionPlayer;
+        ActionSample actionSample{};
     };
 
 private:
@@ -116,6 +122,7 @@ private:
     double elapsedSeconds_ = 0.0;
     double previousElapsedSeconds_ = 0.0;
     ScenePhase phase_ = ScenePhase::Sleeping;
+    ActionId previewAction_ = ActionId::None;
 };
 
 } // namespace besktop

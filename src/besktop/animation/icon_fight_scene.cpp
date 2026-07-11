@@ -386,7 +386,7 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
     pose.rotateY = DegreesToRadians(actor.facing * 5.0 * pose.limbGrow);
     pose.rotateZ = DegreesToRadians(std::sin((actorTime * 3.0) + actor.role) * 2.0 * pose.bodyEffect);
 
-    if (wandering && actor.waitRemaining <= 0.0) {
+    if (wandering && actor.waitRemaining <= 0.0 && !actor.actionPreviewActor) {
         const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
         const WalkLegSample rightStep = SampleWalkLeg(pose.walkPhase, 0.0, 1.0, 1.0);
         const WalkLegSample leftStep = SampleWalkLeg(pose.walkPhase, 0.5, 1.0, 1.0);
@@ -397,6 +397,16 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
         pose.rotateX += DegreesToRadians(std::cos(pose.walkPhase * 2.0 * kPi) * 2.4);
         pose.rotateZ += DegreesToRadians(actor.facing * std::sin(pose.walkPhase * 2.0 * kPi) * 2.8);
     }
+    pose.action = actor.actionSample;
+    const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+    pose.x += actor.facing * pose.action.rootOffsetForward * planeSide;
+    pose.y += pose.action.rootOffsetY * planeSide;
+    pose.rotateX += pose.action.bodyRotateX;
+    pose.rotateY += pose.action.bodyRotateY;
+    pose.rotateZ += pose.action.bodyRotateZ;
+    pose.punch = pose.action.punchStrength;
+    pose.dodge = pose.action.dodgeStrength;
+    pose.hit = pose.action.hitStrength;
     return pose;
 }
 
@@ -728,7 +738,8 @@ JointChain BuildArmChain(
     const ActorPose& pose,
     double planeSide,
     double upperArmLength,
-    double forearmLength)
+    double forearmLength,
+    bool leadArm)
 {
     const double headingSign = HeadingSign(pose);
     const double stride = std::clamp(planeSide * 0.42, 28.0, 50.0);
@@ -753,7 +764,7 @@ JointChain BuildArmChain(
 
     const double upperAngle = DegreesToRadians(upperAngleDegrees);
     const double foreAngle = DegreesToRadians(foreAngleDegrees);
-    const LocalJointChain local = BuildLocalChain(
+    LocalJointChain local = BuildLocalChain(
         shoulder,
         upperArmLength,
         forearmLength,
@@ -761,6 +772,32 @@ JointChain BuildArmChain(
         foreAngle,
         depthSign * planeSide * 0.045,
         depthSign * planeSide * 0.040);
+    const besktop::ActionSample& action = pose.action;
+    const bool targetEnabled = leadArm ? action.leadHandTargetEnabled : action.rearHandTargetEnabled;
+    if (targetEnabled && action.handTargetWeight > 0.001) {
+        const double forward = leadArm ? action.leadHandForward : action.rearHandForward;
+        const double targetY = leadArm ? action.leadHandY : action.rearHandY;
+        const double targetDepth = leadArm ? action.leadHandDepth : action.rearHandDepth;
+        const Vec3 target{
+            shoulder.x + headingSign * forward * planeSide,
+            targetY * planeSide,
+            depthSign * targetDepth * planeSide,
+        };
+        const LocalJointChain actionChain = BuildTwoBoneIkChain(
+            shoulder,
+            target,
+            upperArmLength,
+            forearmLength,
+            -headingSign * 0.75,
+            depthSign * planeSide * 0.035);
+        const double weight = Clamp01(action.handTargetWeight);
+        local.joint.x = LerpValue(local.joint.x, actionChain.joint.x, weight);
+        local.joint.y = LerpValue(local.joint.y, actionChain.joint.y, weight);
+        local.joint.z = LerpValue(local.joint.z, actionChain.joint.z, weight);
+        local.end.x = LerpValue(local.end.x, actionChain.end.x, weight);
+        local.end.y = LerpValue(local.end.y, actionChain.end.y, weight);
+        local.end.z = LerpValue(local.end.z, actionChain.end.z, weight);
+    }
     return ProjectJointChain(local, pose, planeSide);
 }
 
@@ -838,8 +875,11 @@ LimbPose BuildLimbPose(
     const double shinLength = planeSide * 0.41;
 
     LimbPose limbs;
-    limbs.leftArm = BuildArmChain(leftShoulder, -1, leftDepthSign, pose, planeSide, upperArmLength, forearmLength);
-    limbs.rightArm = BuildArmChain(rightShoulder, 1, rightDepthSign, pose, planeSide, upperArmLength, forearmLength);
+    const bool rightLead = rightFront;
+    limbs.leftArm = BuildArmChain(
+        leftShoulder, -1, leftDepthSign, pose, planeSide, upperArmLength, forearmLength, !rightLead);
+    limbs.rightArm = BuildArmChain(
+        rightShoulder, 1, rightDepthSign, pose, planeSide, upperArmLength, forearmLength, rightLead);
     limbs.leftLeg = BuildLegChain(leftHip, -1, leftDepthSign, pose, planeSide, thighLength, shinLength);
     limbs.rightLeg = BuildLegChain(rightHip, 1, rightDepthSign, pose, planeSide, thighLength, shinLength);
     return limbs;
@@ -1150,6 +1190,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     elapsedSeconds_ = 0.0;
     previousElapsedSeconds_ = 0.0;
     phase_ = ScenePhase::Sleeping;
+    previewAction_ = GetRuntimeOptions().actionPreview;
 
     const unsigned char colors[][3] = {
         {44, 135, 255},
@@ -1235,6 +1276,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.blue = colors[index % std::size(colors)][2];
         actor.iconImage = iconImageCache_.Load(icon.image, actor.label);
         actor.usedIconImageFallback = actor.iconImage == nullptr;
+        actor.actionPreviewActor = index == 0 && previewAction_ != ActionId::None;
         actors_.push_back(actor);
     }
 
@@ -1256,6 +1298,9 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     LogInfo(L"icon fight body model: double-sided icon plane; back face keeps non-mirrored icon UV order");
     LogInfo(std::wstring(L"icon fight render shadows: ") + (RenderShadowsEnabled() ? L"enabled" : L"disabled"));
     LogInfo(std::wstring(L"icon fight debug icon plane: ") + (DebugIconPlaneEnabled() ? L"enabled" : L"disabled"));
+    if (previewAction_ != ActionId::None && !actors_.empty()) {
+        LogInfo(L"action preview enabled: " + std::wstring(ActionIdName(previewAction_)));
+    }
     size_t boundActorCount = 0;
     size_t labelBoundsActorCount = 0;
     for (const IconActor& actor : actors_) {
@@ -1324,7 +1369,9 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
 
 void IconFightScene::Update(double elapsedSeconds)
 {
-    const double deltaSeconds = std::clamp(elapsedSeconds - previousElapsedSeconds_, 0.0, 0.10);
+    const double unboundedDeltaSeconds = std::max(0.0, elapsedSeconds - previousElapsedSeconds_);
+    const double deltaSeconds = std::clamp(unboundedDeltaSeconds, 0.0, 0.10);
+    const double actionDeltaSeconds = std::clamp(unboundedDeltaSeconds, 0.0, 1.0);
     previousElapsedSeconds_ = elapsedSeconds;
     elapsedSeconds_ = elapsedSeconds;
     for (IconActor& actor : actors_) {
@@ -1336,6 +1383,27 @@ void IconFightScene::Update(double elapsedSeconds)
         }
 
         actor.localElapsed += deltaSeconds;
+        if (actor.actionPreviewActor) {
+            actor.x = actor.baseX;
+            actor.y = actor.baseY;
+            if (actor.actionPlayer.State().actionId == ActionId::None) {
+                actor.actionPreviewPauseRemaining = std::max(
+                    0.0, actor.actionPreviewPauseRemaining - actionDeltaSeconds);
+                if (actor.actionPreviewPauseRemaining <= 0.0) {
+                    actor.actionPlayer.Start(previewAction_, actor.facing);
+                }
+            } else {
+                actor.actionPlayer.Update(actionDeltaSeconds);
+                actor.actionSample = actor.actionPlayer.Sample();
+                actor.actionPlayer.ConsumeEvents();
+                if (actor.actionPlayer.IsComplete()) {
+                    actor.actionPlayer.Stop();
+                    actor.actionSample = {};
+                    actor.actionPreviewPauseRemaining = 0.55;
+                }
+            }
+            continue;
+        }
         if (actor.waitRemaining > 0.0) {
             actor.waitRemaining = std::max(0.0, actor.waitRemaining - deltaSeconds);
             if (actor.waitRemaining <= 0.0) {

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iterator>
+#include <string>
 
 namespace {
 
@@ -62,6 +63,16 @@ unsigned int ReadEnvironmentUnsigned(const wchar_t* name, unsigned int fallback,
     return static_cast<unsigned int>(std::min<unsigned long>(parsed, maximum));
 }
 
+std::wstring ReadEnvironmentString(const wchar_t* name)
+{
+    wchar_t value[64]{};
+    const DWORD length = GetEnvironmentVariableW(name, value, static_cast<DWORD>(std::size(value)));
+    if (length == 0 || length >= std::size(value)) {
+        return {};
+    }
+    return std::wstring(value, length);
+}
+
 } // namespace
 
 namespace besktop {
@@ -87,6 +98,9 @@ RuntimeOptions LoadRuntimeOptions()
     options.maxActors = ReadEnvironmentUnsigned(L"BESKTOP_MAX_ACTORS", 0, 10000);
     options.animationSpeed = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_SPEED", 1.0, 0.05, 8.0);
     options.animationOffsetSeconds = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_OFFSET", 0.0, 0.0, 3600.0);
+    const std::wstring actionPreviewName = ReadEnvironmentString(L"BESKTOP_ACTION_PREVIEW");
+    options.actionPreview = ParseActionId(actionPreviewName);
+    options.invalidActionPreview = !actionPreviewName.empty() && options.actionPreview == ActionId::None;
     return options;
 }
 

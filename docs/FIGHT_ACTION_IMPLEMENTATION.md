@@ -13,7 +13,7 @@
 - 每演员每帧一次姿态、身体投影和骨架准备缓存。
 - 分阶段帧耗时统计和 `BESKTOP_MAX_ACTORS` 对照测试。
 
-目前缺少的是可复用动作片段、每演员动作状态、攻击者与防守者配对、接触事件、命中判定和结果反馈。不能继续只向 `BuildPose` 添加互相覆盖的时间公式。
+阶段 A 已建立独立 `ActionClip` / `ActionPlayer`、每演员动作状态、统一阶段和单人诊断预览，并实现 `lead_straight`、`layback`、`light_hit_react` 三个代表动作。攻击者与防守者配对、真实接触判定、攻击结果和自动互动仍未实现，属于阶段 B–E。
 
 ## 实施目标
 
@@ -182,6 +182,8 @@ Whiffed
 
 ### 阶段 A：动作播放骨架与单人预览
 
+状态：**已完成**。
+
 目标：建立数据结构，不立即开启自动打架。
 
 - 新增 `ActionId`、`ActionClip`、`ActionPlayer` 和 `ActorActionState`。
@@ -197,6 +199,20 @@ $env:BESKTOP_MAX_ACTORS='1'
 - 首先实现 `lead_straight`、`layback`、`light_hit_react` 三个代表动作，验证攻击、防守和受击三条路径。
 
 验收：三个动作能独立循环、左右镜像、固定骨长、无姿态跳变；普通 Release 不读取预览变量。
+
+当前内置时间段如下，单位为秒：
+
+| 动作 | Prepare | Active | Contact | Recover | Complete 混合结束 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `lead_straight` | 0–0.18 | 0.18–0.30 | 0.30–0.34 | 0.34–0.58 | 0.72 |
+| `layback` | 0–0.16 | 0.16–0.28 | 0.28–0.34 | 0.34–0.58 | 0.76 |
+| `light_hit_react` | 0–0.08 | 0.08–0.16 | 0.16–0.22 | 0.22–0.46 | 0.62 |
+
+`ActionPlayer` 以 delta time 推进，单次更新可以跨越多个阶段；事件使用每次播放独立的位掩码记录，低帧率或 8 倍速跨过 Contact 时仍只产生一次。动作姿态使用局部通道叠加到现有觉醒/步态姿态，手臂目标通过固定骨长两段 IK 解算，进入和退出时按权重混合。
+
+Debug 可直接设置 `BESKTOP_ACTION_PREVIEW`。Release 必须先设置 `BESKTOP_ENABLE_DIAGNOSTICS=1`；无效动作名会安全回退为无预览，并记录一条不含桌面项信息的 Warning。推荐同时设置 `BESKTOP_MAX_ACTORS=1` 和 `BESKTOP_ANIMATION_SPEED=0.5` 观察姿态。
+
+阶段 A 已完成以下验证：x64 Debug、x64 Release、Win32 Release 的 GUI、Pack CLI 和动作逻辑测试均构建通过，三组 CTest 均能发现并通过 `besktop_action_tests`；0.5 倍速实际预览了三个动作，8 倍速跨 Contact 的一次性事件由纯逻辑测试覆盖。普通 Release 未开启诊断时会忽略预览及演员限制变量。参考环境全量 47 个演员稳定约 30.0–31.0 FPS，运行 125 秒期间 GDI 句柄保持 60、USER 句柄保持 18，私有内存约 30.81–30.95 MB。
 
 ### 阶段 B：拳法、防守与打空
 
@@ -301,12 +317,4 @@ Debug 可以直接使用；Release 必须先设置 `BESKTOP_ENABLE_DIAGNOSTICS=1
 
 ## 推荐的下一个实现任务
 
-不要在第一个实现 session 中完成全部动作。下一任务只做“阶段 A：动作播放骨架与单人预览”：
-
-1. 建立可测试的 `ActionClip` / `ActionPlayer` 数据结构。
-2. 接入每演员 `ActorActionState`，但默认 Release 仍保持当前纯漫游。
-3. 增加诊断预览选项。
-4. 用 `lead_straight`、`layback`、`light_hit_react` 验证攻击、防守、受击三种姿态。
-5. 保持全量漫游性能和所有安全退出、跨位宽图标采集行为不变。
-
-阶段 A 稳定后，再按 B、C、D、E 逐步扩大范围。
+阶段 A 已完成并具备纯逻辑测试。下一任务应单独进入阶段 B：补充拳法、防守与打空的固定双人预览；在此之前默认演出仍保持纯漫游，不应直接跳到全量自动群架。

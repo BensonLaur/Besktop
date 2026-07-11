@@ -147,6 +147,7 @@ Recovering
 - 走路阶段使用两段 IK 解腿部，至少做到脚落地短暂锁定、摆动脚抬起、身体轻微 bob。
 - 动作系统后续应迁移为 `AnimationClip + KeyPose + IKTarget + ContactEvent + RootMotion`。
 - 先建立动作播放骨架与单人预览，再依次加入拳法/防守、腿法/重击反馈和受控互动导演；不要把第一轮动作塞进一个巨大提交。
+- 阶段 A 已完成：独立动作 clip/player、统一阶段、一次性 Contact 事件、每演员动作状态和首演员诊断预览已经接入；尚未加入配对、命中判定和自动战斗。
 - 白色手脚使用两段式骨架：手臂为肩膀、肘、手；腿为胯、膝、脚。
 - 肩膀和胯部位于图标薄片之外的局部 3D 空间，不直接贴在图标平面内。
 - 所有关节先在局部 3D 中计算，再和图标薄片使用同一套投影绘制到屏幕。
@@ -208,6 +209,7 @@ $env:BESKTOP_FRAME_TRACE='1'
 $env:BESKTOP_ANIMATION_SPEED='0.5'
 $env:BESKTOP_ANIMATION_OFFSET='4.5'
 $env:BESKTOP_MAX_ACTORS='10'
+$env:BESKTOP_ACTION_PREVIEW='lead_straight'
 ```
 
 Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP_ENABLE_DIAGNOSTICS=1`；未设置总开关时，Release 会忽略单项调试变量，并保持 `1.0x` 动画速度、`0` 秒偏移和低噪声 Warning/Error 日志。
@@ -217,6 +219,7 @@ Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP
 - `BESKTOP_ANIMATION_SPEED` 用于慢放或加速动画，默认 `1.0`。
 - `BESKTOP_ANIMATION_OFFSET` 用于从指定动画秒数开始，减少等待左走、右走、转身、出拳等阶段的时间。
 - `BESKTOP_MAX_ACTORS` 用于限制本次演出的演员数量，便于对比不同图标规模的帧率；未设置或设为 `0` 时保持全部觉醒。
+- `BESKTOP_ACTION_PREVIEW` 支持 `lead_straight`、`layback`、`light_hit_react`，用于首演员原地循环预览；普通 Release 未打开诊断总开关时会忽略该变量。
 
 新增动作或视觉效果前后必须按 [RENDER_PERFORMANCE.md](RENDER_PERFORMANCE.md) 复测全量演员和小规模对照组，记录稳定帧、动作高峰帧、分阶段耗时和资源稳定性。
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "besktop/animation/action_clip.h"
+
 namespace besktop {
 
 struct RuntimeOptions {
@@ -13,6 +15,8 @@ struct RuntimeOptions {
     unsigned int maxActors = 0;
     double animationSpeed = 1.0;
     double animationOffsetSeconds = 0.0;
+    ActionId actionPreview = ActionId::None;
+    bool invalidActionPreview = false;
 };
 
 const RuntimeOptions& GetRuntimeOptions();
