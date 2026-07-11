@@ -710,6 +710,8 @@ std::wstring ShellItemDisplayName(IShellItem* item, SIGDN sigdn)
 struct DesktopShellItemSource {
     besktop::DesktopIconImageSnapshot image;
     std::wstring displayName;
+    POINT viewPosition{};
+    bool hasViewPosition = false;
 };
 
 std::vector<DesktopShellItemSource> CaptureDesktopShellItemSources(int expectedItemCount)
@@ -813,6 +815,8 @@ std::vector<DesktopShellItemSource> CaptureDesktopShellItemSources(int expectedI
         }
 
         ScopedPidl childPidl(rawChildPidl);
+        POINT viewPosition{};
+        const bool hasViewPosition = SUCCEEDED(folderView->GetItemPosition(childPidl.Get(), &viewPosition));
         ComPtr<IShellItem> shellItem;
         result = SHCreateItemWithParent(
             nullptr,
@@ -849,6 +853,8 @@ std::vector<DesktopShellItemSource> CaptureDesktopShellItemSources(int expectedI
 
         source.image.usedFallback = false;
         source.displayName = ShellItemDisplayName(shellItem.Get(), SIGDN_NORMALDISPLAY);
+        source.viewPosition = viewPosition;
+        source.hasViewPosition = hasViewPosition;
         sources[static_cast<size_t>(index)] = std::move(source);
         ++resolvedCount;
     }
@@ -981,6 +987,64 @@ std::wstring ReadDesktopListViewText(HWND listView, HANDLE explorerProcess, int 
     }
 
     return buffer;
+}
+
+bool AreProcessesSameBitness(HANDLE otherProcess)
+{
+    BOOL currentIsWow64 = FALSE;
+    BOOL otherIsWow64 = FALSE;
+    if (!IsWow64Process(GetCurrentProcess(), &currentIsWow64) ||
+        !IsWow64Process(otherProcess, &otherIsWow64)) {
+        return false;
+    }
+    return currentIsWow64 == otherIsWow64;
+}
+
+size_t FindUniqueShellSourceByPosition(
+    const std::vector<DesktopShellItemSource>& sources,
+    const std::vector<bool>& used,
+    const POINT& position,
+    int tolerance)
+{
+    size_t match = sources.size();
+    for (size_t index = 0; index < sources.size(); ++index) {
+        const DesktopShellItemSource& source = sources[index];
+        if (used[index] || source.image.usedFallback || !source.hasViewPosition ||
+            std::abs(source.viewPosition.x - position.x) > tolerance ||
+            std::abs(source.viewPosition.y - position.y) > tolerance) {
+            continue;
+        }
+        if (match != sources.size()) {
+            return sources.size();
+        }
+        match = index;
+    }
+    return match;
+}
+
+size_t FindUniqueShellSourceByDisplayName(
+    const std::vector<DesktopShellItemSource>& sources,
+    const std::vector<bool>& used,
+    const std::wstring& displayName)
+{
+    const std::wstring normalizedName = NormalizeIconKey(displayName);
+    if (normalizedName.empty()) {
+        return sources.size();
+    }
+
+    size_t match = sources.size();
+    for (size_t index = 0; index < sources.size(); ++index) {
+        const DesktopShellItemSource& source = sources[index];
+        if (used[index] || source.image.usedFallback ||
+            NormalizeIconKey(source.displayName) != normalizedName) {
+            continue;
+        }
+        if (match != sources.size()) {
+            return sources.size();
+        }
+        match = index;
+    }
+    return match;
 }
 
 bool TryReadDesktopListViewPosition(HWND listView, HANDLE explorerProcess, int index, POINT& position)
@@ -1163,6 +1227,7 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
     CaptureDesktopIconDisplayMetrics(snapshot, listView);
     const std::vector<DesktopShellItemSource> shellItemSources = CaptureDesktopShellItemSources(itemCount);
     std::vector<bool> shellItemSourceUsed(shellItemSources.size(), false);
+    const bool canReadListViewText = AreProcessesSameBitness(explorerProcess);
     const DesktopIconSourceIndex sourceIndex = BuildDesktopIconSourceIndex();
     int capturedCount = 0;
     int imageSourceCount = 0;
@@ -1180,41 +1245,39 @@ bool CaptureDesktopIconsFromListView(besktop::DesktopSnapshot& snapshot)
 
         besktop::DesktopIconSnapshot icon;
         icon.id = L"desktop-listview-icon-" + std::to_wstring(index + 1);
-        icon.displayName = ReadDesktopListViewText(listView, explorerProcess, index);
-        size_t matchedShellIndex = shellItemSources.size();
-        const std::wstring normalizedListName = NormalizeIconKey(icon.displayName);
-        if (index < static_cast<int>(shellItemSources.size())) {
-            const DesktopShellItemSource& indexedSource = shellItemSources[static_cast<size_t>(index)];
-            if (!indexedSource.image.usedFallback &&
-                NormalizeIconKey(indexedSource.displayName) == normalizedListName) {
-                matchedShellIndex = static_cast<size_t>(index);
-            }
-        }
+        const std::wstring listViewDisplayName = canReadListViewText
+            ? ReadDesktopListViewText(listView, explorerProcess, index)
+            : std::wstring{};
+
+        size_t matchedShellIndex = FindUniqueShellSourceByPosition(
+            shellItemSources,
+            shellItemSourceUsed,
+            position,
+            0);
         if (matchedShellIndex == shellItemSources.size()) {
-            size_t uniqueMatch = shellItemSources.size();
-            bool ambiguous = false;
-            for (size_t shellIndex = 0; shellIndex < shellItemSources.size(); ++shellIndex) {
-                if (shellItemSourceUsed[shellIndex] || shellItemSources[shellIndex].image.usedFallback ||
-                    NormalizeIconKey(shellItemSources[shellIndex].displayName) != normalizedListName) {
-                    continue;
-                }
-                if (uniqueMatch != shellItemSources.size()) {
-                    ambiguous = true;
-                    break;
-                }
-                uniqueMatch = shellIndex;
-            }
-            if (!ambiguous) {
-                matchedShellIndex = uniqueMatch;
-            } else {
-                besktop::LogInfo(L"desktop shell item display match is ambiguous; using file index fallback");
-            }
+            constexpr int kViewPositionTolerance = 2;
+            matchedShellIndex = FindUniqueShellSourceByPosition(
+                shellItemSources,
+                shellItemSourceUsed,
+                position,
+                kViewPositionTolerance);
+        }
+        if (matchedShellIndex == shellItemSources.size() && canReadListViewText) {
+            matchedShellIndex = FindUniqueShellSourceByDisplayName(
+                shellItemSources,
+                shellItemSourceUsed,
+                listViewDisplayName);
         }
         if (matchedShellIndex != shellItemSources.size()) {
-            icon.image = shellItemSources[matchedShellIndex].image;
+            const DesktopShellItemSource& matchedSource = shellItemSources[matchedShellIndex];
+            icon.displayName = matchedSource.displayName;
+            icon.image = matchedSource.image;
             shellItemSourceUsed[matchedShellIndex] = true;
             besktop::LogInfo(L"desktop icon shell source matched: " + icon.displayName + L" -> " + icon.image.sourceIdentifier);
         } else {
+            icon.displayName = listViewDisplayName.empty()
+                ? L"Icon " + std::to_wstring(index + 1)
+                : listViewDisplayName;
             icon.image = ResolveDesktopIconImageSource(sourceIndex, icon.displayName);
         }
         icon.listViewPosition = position;
