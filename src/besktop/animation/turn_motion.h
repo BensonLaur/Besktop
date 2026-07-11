@@ -26,11 +26,23 @@ struct TurnProjectedPoint {
     double depth = 0.0;
 };
 
+struct TurnActorGeometry {
+    double planeWidth = 48.0;
+    double planeHeight = 48.0;
+    double planeSide = 48.0;
+    double limbWidth = 5.0;
+    double visibleMargin = 4.0;
+    double bodyAxisGap = 6.5;
+    double bodyCenterOffset = 30.5;
+    double maximumHorizontalExtent = 54.5;
+};
+
 TurnFacing FacingFromDirection(double direction);
+TurnActorGeometry BuildTurnActorGeometry(double planeWidth, double planeHeight);
 TurnFacing ChooseTurnSafeInitialFacing(
     TurnFacing preferredFacing,
     double capturedCenterX,
-    double bodyCenterOffset,
+    double localIconCenterOffset,
     double iconHalfWidth,
     double minimumX,
     double maximumX,
@@ -49,6 +61,12 @@ GaitVec3 RotateAroundVerticalAxis(const GaitVec3& local, double yaw);
 TurnProjectedPoint ProjectTurnPoint(
     const GaitVec3& local,
     double yaw,
+    double focalLength);
+TurnProjectedPoint ProjectTurnPointWithRotation(
+    const GaitVec3& local,
+    double rotateX,
+    double rotateY,
+    double rotateZ,
     double focalLength);
 
 } // namespace besktop

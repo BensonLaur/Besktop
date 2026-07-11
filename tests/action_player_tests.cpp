@@ -242,18 +242,90 @@ void TestTurnMotionStateAndGeometry()
     constexpr double pi = 3.14159265358979323846;
     constexpr double planeSide = 48.0;
     constexpr double focalLength = 576.0;
-    constexpr double bodyCenterOffset = 27.0;
+    const TurnActorGeometry geometry = BuildTurnActorGeometry(planeSide, planeSide);
+    const double bodyCenterOffset = geometry.bodyCenterOffset;
+    const double localIconCenterOffset = -bodyCenterOffset;
+
+    Check(std::abs(geometry.limbWidth - 5.0) < 1e-9,
+        "48px actor keeps the expected limb width");
+    Check(geometry.visibleMargin >= 3.0,
+        "48px actor reserves a visible screen-space margin");
+    Check(std::abs(geometry.bodyAxisGap -
+        ((geometry.limbWidth * 0.5) + geometry.visibleMargin)) < 1e-9,
+        "body axis gap includes limb radius and visible margin");
+
+    const auto stableVisibleGap = [&](TurnFacing facing) {
+        const double facingSign = facing == TurnFacing::Right ? 1.0 : -1.0;
+        const double rotateX = pi * 2.4 / 180.0;
+        const double rotateY = FacingYaw(facing) + facingSign * pi * 5.0 / 180.0;
+        const double rotateZ = facingSign * pi * 2.8 / 180.0;
+        const GaitVec3 shoulderCenter{0.0, -planeSide * 0.20, 0.0};
+        const GaitVec3 hipCenter{0.0, planeSide * 0.68, 0.0};
+        const TurnProjectedPoint shoulder = ProjectTurnPointWithRotation(
+            shoulderCenter, rotateX, rotateY, rotateZ, focalLength);
+        const TurnProjectedPoint hip = ProjectTurnPointWithRotation(
+            hipCenter, rotateX, rotateY, rotateZ, focalLength);
+        const double axisX = hip.x - shoulder.x;
+        const double axisY = hip.y - shoulder.y;
+        const double axisLength = std::hypot(axisX, axisY);
+        const auto signedDistance = [&](const GaitVec3& local) {
+            const TurnProjectedPoint point = ProjectTurnPointWithRotation(
+                local, rotateX, rotateY, rotateZ, focalLength);
+            return (axisX * (point.y - shoulder.y) -
+                axisY * (point.x - shoulder.x)) / axisLength;
+        };
+        const double halfWidth = geometry.planeWidth * 0.5;
+        const double halfHeight = geometry.planeHeight * 0.5;
+        const GaitVec3 corners[] = {
+            {localIconCenterOffset - halfWidth, -halfHeight, 0.0},
+            {localIconCenterOffset + halfWidth, -halfHeight, 0.0},
+            {localIconCenterOffset + halfWidth, halfHeight, 0.0},
+            {localIconCenterOffset - halfWidth, halfHeight, 0.0},
+        };
+        const double firstDistance = signedDistance(corners[0]);
+        double nearestEdgeDistance = std::abs(firstDistance);
+        for (const GaitVec3& corner : corners) {
+            const double distance = signedDistance(corner);
+            Check(distance * firstDistance > 0.0,
+                "stable icon vertices stay on one side of the projected body axis");
+            nearestEdgeDistance = std::min(nearestEdgeDistance, std::abs(distance));
+        }
+        return nearestEdgeDistance - (geometry.limbWidth * 0.5);
+    };
+    const double rightVisibleGap = stableVisibleGap(TurnFacing::Right);
+    const double leftVisibleGap = stableVisibleGap(TurnFacing::Left);
+    Check(rightVisibleGap >= 3.0,
+        "stable right-facing walk keeps a visible gap from the body axis");
+    Check(leftVisibleGap >= 3.0,
+        "stable left-facing walk keeps a visible gap from the body axis");
+    Check(std::abs(rightVisibleGap - leftVisibleGap) < 0.05,
+        "stable left and right visible gaps are symmetric");
+    Check(ProjectTurnPoint(
+        GaitVec3{localIconCenterOffset, 0.0, 0.0}, FacingYaw(TurnFacing::Right), focalLength).x < 0.0,
+        "right-facing actor keeps the icon behind the body axis");
+    Check(ProjectTurnPoint(
+        GaitVec3{localIconCenterOffset, 0.0, 0.0}, FacingYaw(TurnFacing::Left), focalLength).x > 0.0,
+        "left-facing actor keeps the icon behind the body axis");
+
+    constexpr double capturedCenterX = 120.0;
+    const double rightRootX = capturedCenterX - localIconCenterOffset;
+    const double leftRootX = capturedCenterX + localIconCenterOffset;
+    const double initialPositionError = std::max(
+        std::abs((rightRootX + localIconCenterOffset) - capturedCenterX),
+        std::abs((leftRootX - localIconCenterOffset) - capturedCenterX));
+    Check(initialPositionError < 1e-9,
+        "body-axis root conversion preserves the captured icon center");
 
     Check(ChooseTurnSafeInitialFacing(
-        TurnFacing::Right, 30.0, bodyCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
-        TurnFacing::Left,
+        TurnFacing::Left, 30.0, localIconCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
+        TurnFacing::Right,
         "left-edge actor starts toward the safe turn arc");
     Check(ChooseTurnSafeInitialFacing(
-        TurnFacing::Left, 290.0, bodyCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
-        TurnFacing::Right,
+        TurnFacing::Right, 290.0, localIconCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
+        TurnFacing::Left,
         "right-edge actor starts toward the safe turn arc");
     Check(ChooseTurnSafeInitialFacing(
-        TurnFacing::Right, 160.0, bodyCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
+        TurnFacing::Right, 160.0, localIconCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
         TurnFacing::Right,
         "actor with room on both sides keeps its preferred facing");
 
@@ -312,9 +384,9 @@ void TestTurnMotionStateAndGeometry()
 
     const auto projectedWidth = [=](double yaw) {
         const TurnProjectedPoint left = ProjectTurnPoint(
-            GaitVec3{bodyCenterOffset - planeSide * 0.5, 0.0, 0.0}, yaw, focalLength);
+            GaitVec3{localIconCenterOffset - planeSide * 0.5, 0.0, 0.0}, yaw, focalLength);
         const TurnProjectedPoint right = ProjectTurnPoint(
-            GaitVec3{bodyCenterOffset + planeSide * 0.5, 0.0, 0.0}, yaw, focalLength);
+            GaitVec3{localIconCenterOffset + planeSide * 0.5, 0.0, 0.0}, yaw, focalLength);
         return std::abs(right.x - left.x);
     };
     const double startWidth = projectedWidth(0.0);
@@ -324,7 +396,7 @@ void TestTurnMotionStateAndGeometry()
         "turn midpoint becomes a narrow plane edge");
     Check(std::abs(endWidth - startWidth) < 1e-9,
         "turn endpoint restores icon width");
-    const GaitVec3 localIconCenter{bodyCenterOffset, 0.0, 0.0};
+    const GaitVec3 localIconCenter{localIconCenterOffset, 0.0, 0.0};
     TurnProjectedPoint previousIconCenter = ProjectTurnPoint(
         localIconCenter, 0.0, focalLength);
     double maximumIconCenterStep = 0.0;
@@ -352,11 +424,11 @@ void TestTurnMotionStateAndGeometry()
             endIconCenterX = projectedCenter.x;
         }
     }
-    Check(ProjectTurnPoint(localIconCenter, 0.0, focalLength).x > 0.0 && endIconCenterX < 0.0,
+    Check(ProjectTurnPoint(localIconCenter, 0.0, focalLength).x < 0.0 && endIconCenterX > 0.0,
         "icon center finishes on the opposite side of body axis");
     Check(std::abs(middleIconCenterX) < 1e-9,
         "icon center passes body axis near the edge-on midpoint");
-    Check(maximumIconCenterStep < planeSide * 0.05,
+    Check(maximumIconCenterStep < planeSide * 0.06,
         "icon center follows a continuous projected arc");
 
     const GaitVec3 shoulderCenter{0.0, -planeSide * 0.20, 0.0};
@@ -450,6 +522,10 @@ void TestTurnMotionStateAndGeometry()
 
     std::cout << "turn metrics: duration=0.4, widths="
               << startWidth << "/" << middleWidth << "/" << endWidth
+              << ", axis gap=" << geometry.bodyAxisGap
+              << ", limb width=" << geometry.limbWidth
+              << ", visible gap L/R=" << leftVisibleGap << "/" << rightVisibleGap
+              << ", initial error=" << initialPositionError
               << ", icon radius=" << bodyCenterOffset
               << ", icon max step=" << maximumIconCenterStep
               << ", max anchor step=" << maximumAnchorStep

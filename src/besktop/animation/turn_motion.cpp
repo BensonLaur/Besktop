@@ -21,22 +21,39 @@ TurnFacing FacingFromDirection(double direction)
     return direction < 0.0 ? TurnFacing::Left : TurnFacing::Right;
 }
 
+TurnActorGeometry BuildTurnActorGeometry(double planeWidth, double planeHeight)
+{
+    TurnActorGeometry geometry;
+    geometry.planeWidth = std::max(8.0, std::isfinite(planeWidth) ? planeWidth : 48.0);
+    geometry.planeHeight = std::max(8.0, std::isfinite(planeHeight) ? planeHeight : 48.0);
+    geometry.planeSide = std::max(24.0, std::max(geometry.planeWidth, geometry.planeHeight));
+    geometry.limbWidth = std::clamp(geometry.planeSide * 0.072, 5.0, 8.5);
+    geometry.visibleMargin = std::clamp(geometry.planeSide * 0.08, 4.0, 7.0);
+    geometry.bodyAxisGap = (geometry.limbWidth * 0.5) + geometry.visibleMargin;
+    geometry.bodyCenterOffset = (geometry.planeWidth * 0.5) + geometry.bodyAxisGap;
+    geometry.maximumHorizontalExtent = geometry.bodyCenterOffset + (geometry.planeWidth * 0.5);
+    return geometry;
+}
+
 TurnFacing ChooseTurnSafeInitialFacing(
     TurnFacing preferredFacing,
     double capturedCenterX,
-    double bodyCenterOffset,
+    double localIconCenterOffset,
     double iconHalfWidth,
     double minimumX,
     double maximumX,
     double padding)
 {
-    const double safeOffset = std::max(0.0, bodyCenterOffset);
     const double safeHalfWidth = std::max(0.0, iconHalfWidth);
     const double safePadding = std::max(0.0, padding);
+    const double rightTurnCenter = capturedCenterX - (2.0 * localIconCenterOffset);
+    const double leftTurnCenter = capturedCenterX + (2.0 * localIconCenterOffset);
     const bool rightFacingTurnFits =
-        capturedCenterX - (2.0 * safeOffset) - safeHalfWidth >= minimumX + safePadding;
+        rightTurnCenter - safeHalfWidth >= minimumX + safePadding &&
+        rightTurnCenter + safeHalfWidth <= maximumX - safePadding;
     const bool leftFacingTurnFits =
-        capturedCenterX + (2.0 * safeOffset) + safeHalfWidth <= maximumX - safePadding;
+        leftTurnCenter - safeHalfWidth >= minimumX + safePadding &&
+        leftTurnCenter + safeHalfWidth <= maximumX - safePadding;
 
     if (preferredFacing == TurnFacing::Right && !rightFacingTurnFits && leftFacingTurnFits) {
         return TurnFacing::Left;
@@ -145,7 +162,28 @@ GaitVec3 RotateAroundVerticalAxis(const GaitVec3& local, double yaw)
 
 TurnProjectedPoint ProjectTurnPoint(const GaitVec3& local, double yaw, double focalLength)
 {
-    const GaitVec3 rotated = RotateAroundVerticalAxis(local, yaw);
+    return ProjectTurnPointWithRotation(local, 0.0, yaw, 0.0, focalLength);
+}
+
+TurnProjectedPoint ProjectTurnPointWithRotation(
+    const GaitVec3& local,
+    double rotateX,
+    double rotateY,
+    double rotateZ,
+    double focalLength)
+{
+    const GaitVec3 afterY = RotateAroundVerticalAxis(local, rotateY);
+    const double cosineX = std::cos(rotateX);
+    const double sineX = std::sin(rotateX);
+    const double yAfterX = local.y * cosineX - afterY.z * sineX;
+    const double zAfterX = local.y * sineX + afterY.z * cosineX;
+    const double cosineZ = std::cos(rotateZ);
+    const double sineZ = std::sin(rotateZ);
+    const GaitVec3 rotated{
+        afterY.x * cosineZ - yAfterX * sineZ,
+        afterY.x * sineZ + yAfterX * cosineZ,
+        zAfterX,
+    };
     const double safeFocalLength = std::max(80.0, focalLength);
     const double denominator = std::max(40.0, safeFocalLength - rotated.z);
     const double perspective = safeFocalLength / denominator;

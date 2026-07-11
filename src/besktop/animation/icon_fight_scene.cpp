@@ -514,25 +514,26 @@ BodyProjection BuildBodyProjection(const besktop::IconFightScene::IconActor& act
 
     const double rawWidth = std::max(8.0, actor.planeWidth);
     const double rawHeight = std::max(8.0, actor.planeHeight);
-    const double planeSide = std::max(rawWidth, rawHeight);
+    const besktop::TurnActorGeometry turnGeometry =
+        besktop::BuildTurnActorGeometry(rawWidth, rawHeight);
+    const double planeSide = turnGeometry.planeSide;
     const double halfW = rawWidth * 0.5;
     const double halfH = rawHeight * 0.5;
-    const double bodyAxisGap = std::clamp(planeSide * 0.06, 3.0, 8.0);
-    const double bodyCenterOffset = halfW + bodyAxisGap;
+    const double localIconCenterX = -turnGeometry.bodyCenterOffset;
 
     BodyProjection projection;
     const ProjectedPoint projectedCenter = ProjectActorPoint(
-        Vec3{bodyCenterOffset, 0.0, 0.0}, pose, planeSide);
+        Vec3{localIconCenterX, 0.0, 0.0}, pose, planeSide);
     projection.centerX = projectedCenter.point.X;
     projection.centerY = projectedCenter.point.Y;
     projection.points[0] = ProjectActorPoint(
-        Vec3{bodyCenterOffset - halfW, -halfH, 0.0}, pose, planeSide).point;
+        Vec3{localIconCenterX - halfW, -halfH, 0.0}, pose, planeSide).point;
     projection.points[1] = ProjectActorPoint(
-        Vec3{bodyCenterOffset + halfW, -halfH, 0.0}, pose, planeSide).point;
+        Vec3{localIconCenterX + halfW, -halfH, 0.0}, pose, planeSide).point;
     projection.points[2] = ProjectActorPoint(
-        Vec3{bodyCenterOffset + halfW, halfH, 0.0}, pose, planeSide).point;
+        Vec3{localIconCenterX + halfW, halfH, 0.0}, pose, planeSide).point;
     projection.points[3] = ProjectActorPoint(
-        Vec3{bodyCenterOffset - halfW, halfH, 0.0}, pose, planeSide).point;
+        Vec3{localIconCenterX - halfW, halfH, 0.0}, pose, planeSide).point;
 
     Gdiplus::RectF bodyBounds = BoundsForPoints(projection.points, std::size(projection.points));
     if (bodyBounds.Width < kMinimumProjectedEdge) {
@@ -896,8 +897,10 @@ void DrawActorLimbs(
     const double alphaCeiling = layer == LimbLayer::Front ? 248.0 : 178.0;
     const double alphaValue = alphaCeiling * pose.limbGrow;
     const unsigned char alpha = static_cast<unsigned char>(std::clamp(alphaValue, 0.0, 255.0));
-    const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
-    const float limbWidth = ToFloat(std::clamp(planeSide * 0.072, 5.0, 8.5));
+    const besktop::TurnActorGeometry turnGeometry =
+        besktop::BuildTurnActorGeometry(actor.planeWidth, actor.planeHeight);
+    const double planeSide = turnGeometry.planeSide;
+    const float limbWidth = ToFloat(turnGeometry.limbWidth);
     const bool renderShadows = RenderShadowsEnabled();
 
     const JointChain* chains[] = {
@@ -1238,18 +1241,19 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
             ((actor.randomState & 1u) == 0u ? TurnFacing::Right : TurnFacing::Left);
         const double capturedIconCenterX =
             (((planeBounds.left + planeBounds.right) * 0.5) - snapshot.monitorBounds.left) * scaleX;
-        const double planeSide = std::max(displayPlaneWidth, displayPlaneHeight);
-        const double bodyAxisGap = std::clamp(planeSide * 0.06, 3.0, 8.0);
-        const double bodyCenterOffset = (displayPlaneWidth * 0.5) + bodyAxisGap;
+        const TurnActorGeometry turnGeometry =
+            BuildTurnActorGeometry(displayPlaneWidth, displayPlaneHeight);
+        const double planeSide = turnGeometry.planeSide;
+        const double localIconCenterOffset = -turnGeometry.bodyCenterOffset;
         initialFacing = ChooseTurnSafeInitialFacing(
             initialFacing,
             capturedIconCenterX,
-            bodyCenterOffset,
+            localIconCenterOffset,
             displayPlaneWidth * 0.5,
             static_cast<double>(clientBounds_.left),
             static_cast<double>(clientBounds_.right));
         const double initialFacingSign = initialFacing == TurnFacing::Right ? 1.0 : -1.0;
-        actor.baseX = capturedIconCenterX - initialFacingSign * bodyCenterOffset;
+        actor.baseX = capturedIconCenterX - initialFacingSign * localIconCenterOffset;
         actor.baseY = (((planeBounds.top + planeBounds.bottom) * 0.5) - snapshot.monitorBounds.top) * scaleY;
         actor.x = actor.baseX;
         actor.y = actor.baseY;
@@ -1486,8 +1490,12 @@ void IconFightScene::Update(double elapsedSeconds)
 
 void IconFightScene::ChooseWanderTarget(IconActor& actor)
 {
-    const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
-    const double sideMargin = std::max(28.0, planeSide * 1.25);
+    const TurnActorGeometry turnGeometry =
+        BuildTurnActorGeometry(actor.planeWidth, actor.planeHeight);
+    const double planeSide = turnGeometry.planeSide;
+    const double sideMargin = std::max(
+        std::max(28.0, planeSide * 1.25),
+        turnGeometry.maximumHorizontalExtent + turnGeometry.visibleMargin);
     const double topMargin = std::max(24.0, planeSide * 0.80);
     const double bottomMargin = usingCapturedWorkArea_ ?
         std::max(40.0, planeSide * 1.65) :
@@ -1545,10 +1553,10 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
         timings->actorPrepMs = CounterMilliseconds(actorPrepStart, end);
     }
 
-    const double sharedPlaneSide = actors_.empty() ?
-        48.0 :
-        std::max(24.0, std::max(actors_.front().planeWidth, actors_.front().planeHeight));
-    const float sharedLimbWidth = ToFloat(std::clamp(sharedPlaneSide * 0.072, 5.0, 8.5));
+    const TurnActorGeometry sharedTurnGeometry = actors_.empty() ?
+        BuildTurnActorGeometry(48.0, 48.0) :
+        BuildTurnActorGeometry(actors_.front().planeWidth, actors_.front().planeHeight);
+    const float sharedLimbWidth = ToFloat(sharedTurnGeometry.limbWidth);
     Gdiplus::Pen sharedBackLimb(Gdiplus::Color(178, 250, 253, 255), sharedLimbWidth);
     sharedBackLimb.SetStartCap(Gdiplus::LineCapRound);
     sharedBackLimb.SetEndCap(Gdiplus::LineCapRound);
