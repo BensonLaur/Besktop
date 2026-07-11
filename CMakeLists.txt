@@ -4,6 +4,8 @@ project(Besktop VERSION 0.1.0 LANGUAGES CXX RC)
 
 set(BESKTOP_BASIC_PACK_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/packs/icon-fight-basic.bpack")
+set(BESKTOP_APP_ICON_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/app/besktop.ico")
 set(BESKTOP_GENERATED_RESOURCE_DIR
     "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(BESKTOP_GENERATED_RESOURCE_FILE

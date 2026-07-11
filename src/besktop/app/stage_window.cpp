@@ -6,6 +6,7 @@
 #include "besktop/logging/logger.h"
 #include "besktop/render/wallpaper_renderer.h"
 #include "besktop/render/taskbar_renderer.h"
+#include "besktop/resources/resource.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -69,6 +70,17 @@ UINT GetDpiForWindowCompat(HWND hwnd)
         ReleaseDC(nullptr, screenDc);
     }
     return dpi > 0 ? dpi : 96;
+}
+
+HICON LoadApplicationIcon(HINSTANCE instance, int width, int height)
+{
+    return static_cast<HICON>(LoadImageW(
+        instance,
+        MAKEINTRESOURCEW(IDI_BESKTOP_APP),
+        IMAGE_ICON,
+        width,
+        height,
+        LR_DEFAULTCOLOR | LR_SHARED));
 }
 
 } // namespace
@@ -182,11 +194,23 @@ bool StageWindow::Create(int showCommand)
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
     windowClass.lpfnWndProc = StageWindow::WindowProc;
     windowClass.hInstance = instance_;
-    windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    windowClass.hIcon = LoadApplicationIcon(
+        instance_,
+        GetSystemMetrics(SM_CXICON),
+        GetSystemMetrics(SM_CYICON));
+    if (windowClass.hIcon == nullptr) {
+        windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    }
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     windowClass.hbrBackground = nullptr;
     windowClass.lpszClassName = kStageWindowClassName;
-    windowClass.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
+    windowClass.hIconSm = LoadApplicationIcon(
+        instance_,
+        GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON));
+    if (windowClass.hIconSm == nullptr) {
+        windowClass.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
+    }
 
     if (RegisterClassExW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
         LogError(L"RegisterClassExW failed: " + std::to_wstring(GetLastError()));
