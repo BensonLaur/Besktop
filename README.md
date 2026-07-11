@@ -135,6 +135,7 @@ Debug 或已启用诊断的 Release 会记录详细 Info 日志；普通 Release
 
 - 技术方案：[docs/TECHNICAL_PLAN.md](docs/TECHNICAL_PLAN.md)
 - 实施计划：[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
+- 渲染性能基线与回归规范：[docs/RENDER_PERFORMANCE.md](docs/RENDER_PERFORMANCE.md)
 - 仓库定位和发布模型：[docs/REPOSITORY_AND_RELEASE_MODEL.md](docs/REPOSITORY_AND_RELEASE_MODEL.md)
 - Core 单 EXE 发布构建：[docs/RELEASE.md](docs/RELEASE.md)
 - v0.1.0 发布说明候选稿：[docs/RELEASE_NOTES_v0.1.0.md](docs/RELEASE_NOTES_v0.1.0.md)

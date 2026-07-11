@@ -218,6 +218,8 @@ Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP
 - `BESKTOP_ANIMATION_OFFSET` 用于从指定动画秒数开始，减少等待左走、右走、转身、出拳等阶段的时间。
 - `BESKTOP_MAX_ACTORS` 用于限制本次演出的演员数量，便于对比不同图标规模的帧率；未设置或设为 `0` 时保持全部觉醒。
 
+新增动作或视觉效果前后必须按 [RENDER_PERFORMANCE.md](RENDER_PERFORMANCE.md) 复测全量演员和小规模对照组，记录稳定帧、动作高峰帧、分阶段耗时和资源稳定性。
+
 ## 第一版默认取舍
 
 - 只支持主显示器。
