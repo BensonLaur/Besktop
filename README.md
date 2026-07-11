@@ -28,7 +28,7 @@ Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一
 这个在哪下载？
 ```
 
-当前阶段：**全量图标觉醒漫游 MVP**。桌面舞台、真实图标采集、图标演员、基础动作和安全退出已经落地，当前先打磨全部图标错峰觉醒和自由漫游。
+当前阶段：**v0.1.0 RC**。桌面舞台、真实图标采集、图标演员、基础动作和安全退出已经落地，正在完成首个公开下载候选版本的兼容性与发布验收，尚未正式发布。
 
 ## 它会发生什么？
 
@@ -132,6 +132,8 @@ Debug 或已启用诊断的 Release 会记录详细 Info 日志；普通 Release
 - 实施计划：[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
 - 仓库定位和发布模型：[docs/REPOSITORY_AND_RELEASE_MODEL.md](docs/REPOSITORY_AND_RELEASE_MODEL.md)
 - Core 单 EXE 发布构建：[docs/RELEASE.md](docs/RELEASE.md)
+- v0.1.0 发布说明候选稿：[docs/RELEASE_NOTES_v0.1.0.md](docs/RELEASE_NOTES_v0.1.0.md)
+- v0.1.0 发布候选验收清单：[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - 插件框架 MVP：[docs/MVP_PLUGIN_FRAMEWORK.md](docs/MVP_PLUGIN_FRAMEWORK.md)
 
 ## 仓库关系
