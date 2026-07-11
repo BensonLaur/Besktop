@@ -150,6 +150,7 @@ Recovering
 - 动作系统后续应迁移为 `AnimationClip + KeyPose + IKTarget + ContactEvent + RootMotion`。
 - 先建立动作播放骨架与单人预览，再依次加入拳法/防守、腿法/重击反馈和受控互动导演；不要把第一轮动作塞进一个巨大提交。
 - 阶段 A 已完成：独立动作 clip/player、统一阶段、一次性 Contact 事件、每演员动作状态和首演员诊断预览已经接入；在不启用配对和自动战斗的前提下，已额外完成 `side_kick` 的单人预览、固定骨长腿部目标和支撑脚锁定验证。
+- 漫游转向已从瞬时 `facing` 翻转改为独立 `TurnMotionState`：当前朝向和目标朝向分离，反向目标先退出步态，再原地完成 `0.40` 秒连续 Y 轴转身，最后提交新朝向并恢复行走。角色根节点、肩部中心和胯部中心组成固定身体中轴；图标中心保留相对轴的水平偏移并绕轴走圆弧，图标薄片、肩胯和四肢共享局部 3D yaw。挂点不再单帧换边，前后层按投影平均深度交换；转身不属于攻击动作，也不发出 Contact。
 - 白色手脚使用两段式骨架：手臂为肩膀、肘、手；腿为胯、膝、脚。
 - 肩膀和胯部位于图标薄片之外的局部 3D 空间，不直接贴在图标平面内。
 - 所有关节先在局部 3D 中计算，再和图标薄片使用同一套投影绘制到屏幕。
@@ -222,6 +223,7 @@ Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP
 - `BESKTOP_ANIMATION_OFFSET` 用于从指定动画秒数开始，减少等待左走、右走、转身、出拳等阶段的时间。
 - `BESKTOP_MAX_ACTORS` 用于限制本次演出的演员数量，便于对比不同图标规模的帧率；未设置或设为 `0` 时保持全部觉醒。
 - `BESKTOP_ACTION_PREVIEW` 支持 `lead_straight`、`layback`、`light_hit_react`、`side_kick`，用于首演员原地循环预览；普通 Release 未打开诊断总开关时会忽略该变量。
+- `BESKTOP_TURN_PREVIEW=1` 用于首演员原地循环左右转身；Debug 可直接使用，Release 只有在 `BESKTOP_ENABLE_DIAGNOSTICS=1` 时才会读取。
 
 新增动作或视觉效果前后必须按 [RENDER_PERFORMANCE.md](RENDER_PERFORMANCE.md) 复测全量演员和小规模对照组，记录稳定帧、动作高峰帧、分阶段耗时和资源稳定性。
 

@@ -9,6 +9,7 @@
 
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/animation/action_player.h"
+#include "besktop/animation/turn_motion.h"
 #include "besktop/render/icon_image_cache.h"
 
 namespace besktop {
@@ -87,7 +88,8 @@ public:
         double awakeningDelay = 0.0;
         double walkPhase = 0.0;
         double locomotionWeight = 0.0;
-        double facing = 1.0;
+        double turnPoseWeight = 1.0;
+        TurnMotionState turnMotion{};
         std::uint32_t randomState = 1;
         RECT labelBounds{};
         bool usedLabelBoundsFallback = true;
@@ -103,6 +105,8 @@ public:
         bool usedIconImageFallback = true;
         bool actionPreviewActor = false;
         double actionPreviewPauseRemaining = 0.45;
+        bool turnPreviewActor = false;
+        double turnPreviewPauseRemaining = 0.65;
         ActionPlayer actionPlayer;
         ActionSample actionSample{};
     };
@@ -125,6 +129,7 @@ private:
     double previousElapsedSeconds_ = 0.0;
     ScenePhase phase_ = ScenePhase::Sleeping;
     ActionId previewAction_ = ActionId::None;
+    bool turnPreviewEnabled_ = false;
 };
 
 } // namespace besktop

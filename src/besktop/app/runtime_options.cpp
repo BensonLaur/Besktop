@@ -101,6 +101,7 @@ RuntimeOptions LoadRuntimeOptions()
     const std::wstring actionPreviewName = ReadEnvironmentString(L"BESKTOP_ACTION_PREVIEW");
     options.actionPreview = ParseActionId(actionPreviewName);
     options.invalidActionPreview = !actionPreviewName.empty() && options.actionPreview == ActionId::None;
+    options.turnPreviewEnabled = ReadTruthyEnvironmentFlag(L"BESKTOP_TURN_PREVIEW");
     return options;
 }
 

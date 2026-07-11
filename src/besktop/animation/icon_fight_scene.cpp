@@ -354,12 +354,20 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
     pose.walkPhase = actor.walkPhase;
     pose.locomotionWeight = actor.locomotionWeight;
     pose.gait = std::sin(pose.walkPhase * 2.0 * kPi) * pose.locomotionWeight;
-    pose.facing = actor.facing;
-    pose.heading = actor.facing < 0.0 ? ActorPose::Heading::MoveLeft : ActorPose::Heading::MoveRight;
-    pose.attackingRight = actor.facing > 0.0;
-    pose.rotateX = DegreesToRadians(std::sin((actorTime * 4.2) + actor.role) * 3.0 * pose.bodyEffect);
-    pose.rotateY = DegreesToRadians(actor.facing * 5.0 * pose.limbGrow);
-    pose.rotateZ = DegreesToRadians(std::sin((actorTime * 3.0) + actor.role) * 2.0 * pose.bodyEffect);
+    pose.facing = actor.turnMotion.currentFacing == besktop::TurnFacing::Left ? -1.0 : 1.0;
+    pose.heading = actor.turnMotion.turning ?
+        ActorPose::Heading::FacingOut :
+        (pose.facing < 0.0 ? ActorPose::Heading::MoveLeft : ActorPose::Heading::MoveRight);
+    pose.attackingRight = pose.facing > 0.0;
+    const double turnStabilityWeight = actor.turnMotion.turning && actor.turnMotion.progress > 0.0 ?
+        0.0 : actor.turnPoseWeight;
+    pose.rotateX = DegreesToRadians(
+        std::sin((actorTime * 4.2) + actor.role) * 3.0 * pose.bodyEffect * turnStabilityWeight);
+    const double turnYaw = besktop::SampleTurnYaw(actor.turnMotion);
+    pose.rotateY = turnYaw + DegreesToRadians(
+        std::cos(turnYaw) * 5.0 * pose.limbGrow * turnStabilityWeight);
+    pose.rotateZ = DegreesToRadians(
+        std::sin((actorTime * 3.0) + actor.role) * 2.0 * pose.bodyEffect * turnStabilityWeight);
 
     if (wandering && pose.locomotionWeight > 0.001 && !actor.actionPreviewActor) {
         const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
@@ -377,11 +385,11 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
         pose.rotateX += DegreesToRadians(
             std::cos(pose.walkPhase * 2.0 * kPi) * 2.4 * pose.locomotionWeight);
         pose.rotateZ += DegreesToRadians(
-            actor.facing * std::sin(pose.walkPhase * 2.0 * kPi) * 2.8 * pose.locomotionWeight);
+            pose.facing * std::sin(pose.walkPhase * 2.0 * kPi) * 2.8 * pose.locomotionWeight);
     }
     pose.action = actor.actionSample;
     const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
-    pose.x += actor.facing * pose.action.rootOffsetForward * planeSide;
+    pose.x += pose.facing * pose.action.rootOffsetForward * planeSide;
     pose.y += pose.action.rootOffsetY * planeSide;
     pose.rotateX += pose.action.bodyRotateX;
     pose.rotateY += pose.action.bodyRotateY;
@@ -453,13 +461,12 @@ Vec3 RotateActorVector(const Vec3& local, const ActorPose& pose)
 {
     const double cosX = std::cos(pose.rotateX);
     const double sinX = std::sin(pose.rotateX);
-    const double cosY = std::cos(pose.rotateY);
-    const double sinY = std::sin(pose.rotateY);
     const double cosZ = std::cos(pose.rotateZ);
     const double sinZ = std::sin(pose.rotateZ);
 
-    const double xAfterY = local.x * cosY + local.z * sinY;
-    const double zAfterY = -local.x * sinY + local.z * cosY;
+    const Vec3 afterY = besktop::RotateAroundVerticalAxis(local, pose.rotateY);
+    const double xAfterY = afterY.x;
+    const double zAfterY = afterY.z;
     const double yAfterX = local.y * cosX - zAfterY * sinX;
     const double zAfterX = local.y * sinX + zAfterY * cosX;
 
@@ -510,14 +517,22 @@ BodyProjection BuildBodyProjection(const besktop::IconFightScene::IconActor& act
     const double planeSide = std::max(rawWidth, rawHeight);
     const double halfW = rawWidth * 0.5;
     const double halfH = rawHeight * 0.5;
+    const double bodyAxisGap = std::clamp(planeSide * 0.06, 3.0, 8.0);
+    const double bodyCenterOffset = halfW + bodyAxisGap;
 
     BodyProjection projection;
-    projection.centerX = pose.x;
-    projection.centerY = pose.y + pose.bob;
-    projection.points[0] = ProjectActorPoint(Vec3{-halfW, -halfH, 0.0}, pose, planeSide).point;
-    projection.points[1] = ProjectActorPoint(Vec3{halfW, -halfH, 0.0}, pose, planeSide).point;
-    projection.points[2] = ProjectActorPoint(Vec3{halfW, halfH, 0.0}, pose, planeSide).point;
-    projection.points[3] = ProjectActorPoint(Vec3{-halfW, halfH, 0.0}, pose, planeSide).point;
+    const ProjectedPoint projectedCenter = ProjectActorPoint(
+        Vec3{bodyCenterOffset, 0.0, 0.0}, pose, planeSide);
+    projection.centerX = projectedCenter.point.X;
+    projection.centerY = projectedCenter.point.Y;
+    projection.points[0] = ProjectActorPoint(
+        Vec3{bodyCenterOffset - halfW, -halfH, 0.0}, pose, planeSide).point;
+    projection.points[1] = ProjectActorPoint(
+        Vec3{bodyCenterOffset + halfW, -halfH, 0.0}, pose, planeSide).point;
+    projection.points[2] = ProjectActorPoint(
+        Vec3{bodyCenterOffset + halfW, halfH, 0.0}, pose, planeSide).point;
+    projection.points[3] = ProjectActorPoint(
+        Vec3{bodyCenterOffset - halfW, halfH, 0.0}, pose, planeSide).point;
 
     Gdiplus::RectF bodyBounds = BoundsForPoints(projection.points, std::size(projection.points));
     if (bodyBounds.Width < kMinimumProjectedEdge) {
@@ -599,29 +614,6 @@ struct LimbPose {
     JointChain rightLeg{};
 };
 
-bool IsRightSideFront(ActorPose::Heading heading)
-{
-    switch (heading) {
-    case ActorPose::Heading::MoveLeft:
-        return false;
-    case ActorPose::Heading::MoveRight:
-    case ActorPose::Heading::FacingOut:
-    default:
-        return true;
-    }
-}
-
-double HeadingSign(const ActorPose& pose)
-{
-    if (pose.heading == ActorPose::Heading::MoveLeft) {
-        return -1.0;
-    }
-    if (pose.heading == ActorPose::Heading::MoveRight) {
-        return 1.0;
-    }
-    return pose.facing < 0.0 ? -1.0 : 1.0;
-}
-
 LocalJointChain BuildLocalChain(
     const Vec3& root,
     double firstLength,
@@ -698,7 +690,7 @@ JointChain BuildArmChain(
     double forearmLength,
     bool leadArm)
 {
-    const double headingSign = HeadingSign(pose);
+    constexpr double headingSign = 1.0;
     const besktop::GaitGeometry gaitGeometry = besktop::BuildGaitGeometry(
         planeSide, planeSide * 0.40, planeSide * 0.41);
     const besktop::GaitLegSample oppositeLeg = besktop::SampleGaitLeg(
@@ -708,22 +700,15 @@ JointChain BuildArmChain(
         pose.locomotionWeight);
     const double strideScale = std::max(1.0, gaitGeometry.stride * 0.45);
     double forward = headingSign * std::clamp(oppositeLeg.footForward / strideScale, -1.0, 1.0);
-    if (pose.heading == ActorPose::Heading::FacingOut) {
-        forward = sideSign * 0.46 + (oppositeLeg.footForward / strideScale) * 0.14;
-    }
-    if (pose.heading == ActorPose::Heading::MoveRight) {
-        forward = -forward;
-    }
+    forward = -forward;
 
     const double lift = gaitGeometry.stepHeight > 0.0 ?
         oppositeLeg.footLift / gaitGeometry.stepHeight :
         0.0;
     double upperAngleDegrees = 94.0 - (forward * 25.0) - (lift * 3.0);
     double foreAngleDegrees = 108.0 - (forward * 17.0) + (lift * 4.0);
-    if (pose.heading == ActorPose::Heading::MoveRight) {
-        upperAngleDegrees = 180.0 - upperAngleDegrees;
-        foreAngleDegrees = 180.0 - foreAngleDegrees;
-    }
+    upperAngleDegrees = 180.0 - upperAngleDegrees;
+    foreAngleDegrees = 180.0 - foreAngleDegrees;
 
     const double upperAngle = DegreesToRadians(upperAngleDegrees);
     const double foreAngle = DegreesToRadians(foreAngleDegrees);
@@ -774,7 +759,7 @@ JointChain BuildLegChain(
     double shinLength,
     bool leadLeg)
 {
-    const double headingSign = HeadingSign(pose);
+    constexpr double headingSign = 1.0;
     const besktop::GaitGeometry gaitGeometry = besktop::BuildGaitGeometry(
         planeSide, thighLength, shinLength);
     const besktop::GaitLegSample sample = besktop::SampleGaitLeg(
@@ -792,15 +777,6 @@ JointChain BuildLegChain(
         hip.z + (depthSign * gaitGeometry.footDepth),
     };
     Vec3 bendHint{headingSign, 0.0, depthSign * 0.18};
-    if (pose.heading == ActorPose::Heading::FacingOut) {
-        footTarget.x = hip.x +
-            (sideSign * gaitGeometry.stride * 0.10 * pose.locomotionWeight) +
-            (headingSign * sample.footForward * 0.10);
-        footTarget.y = groundY - (sample.footLift * 0.55);
-        footTarget.z = hip.z + (depthSign * planeSide * 0.10);
-        bendHint = Vec3{static_cast<double>(sideSign), 0.0, depthSign * 0.18};
-    }
-
     const besktop::ActionSample& action = pose.action;
     const bool targetEnabled = leadLeg ? action.leadFootTargetEnabled : action.rearFootTargetEnabled;
     if (targetEnabled && action.footTargetWeight > 0.001) {
@@ -834,26 +810,23 @@ LimbPose BuildLimbPose(
     const ActorPose& pose)
 {
     const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
-    const double halfW = std::max(8.0, actor.planeWidth) * 0.5;
     const double halfH = std::max(8.0, actor.planeHeight) * 0.5;
     const double shoulderDepth = planeSide * 0.24;
     const double hipDepth = planeSide * 0.22;
-    const bool rightFront = IsRightSideFront(pose.heading);
-    const double rightDepthSign = rightFront ? 1.0 : -1.0;
-    const double leftDepthSign = -rightDepthSign;
-    const double headingSign = HeadingSign(pose);
-    const double bodySideInset = std::clamp(planeSide * 0.035, 2.0, 5.0);
+    constexpr double rightDepthSign = 1.0;
+    constexpr double leftDepthSign = -1.0;
     const double smallHipExtraOut = 0.0;
     const double hipDownOut = std::clamp(planeSide * 0.18, 12.0, 24.0);
-    const double sideAttachX = headingSign * (halfW - bodySideInset);
-    const double shoulderRootX = sideAttachX;
+    constexpr double shoulderRootX = 0.0;
     const double shoulderRootY = -halfH * 0.20;
     const Vec3 leftShoulder{shoulderRootX, shoulderRootY, leftDepthSign * shoulderDepth};
     const Vec3 rightShoulder{shoulderRootX, shoulderRootY, rightDepthSign * shoulderDepth};
     const double hipRootY = halfH + hipDownOut;
-    const double hipRootX = sideAttachX + (headingSign * smallHipExtraOut);
+    const double hipRootX = smallHipExtraOut;
     const Vec3 leftHip{hipRootX, hipRootY, leftDepthSign * hipDepth};
     const Vec3 rightHip{hipRootX, hipRootY, rightDepthSign * hipDepth};
+    const bool rightFront =
+        RotateActorVector(rightShoulder, pose).z >= RotateActorVector(leftShoulder, pose).z;
 
     const double upperArmLength = planeSide * 0.30;
     const double forearmLength = planeSide * 0.32;
@@ -1196,6 +1169,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     previousElapsedSeconds_ = 0.0;
     phase_ = ScenePhase::Sleeping;
     previewAction_ = GetRuntimeOptions().actionPreview;
+    turnPreviewEnabled_ = GetRuntimeOptions().turnPreviewEnabled;
 
     const unsigned char colors[][3] = {
         {44, 135, 255},
@@ -1257,7 +1231,25 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
 
         IconActor actor;
         actor.label = icon.displayName.empty() ? (L"Icon " + std::to_wstring(index + 1)) : icon.displayName;
-        actor.baseX = (((planeBounds.left + planeBounds.right) * 0.5) - snapshot.monitorBounds.left) * scaleX;
+        actor.randomState = 0x9E3779B9u ^ (static_cast<std::uint32_t>(index + 1) * 0x85EBCA6Bu);
+        actor.randomState ^= actor.randomState >> 16;
+        TurnFacing initialFacing = turnPreviewEnabled_ && index == 0 ?
+            TurnFacing::Right :
+            ((actor.randomState & 1u) == 0u ? TurnFacing::Right : TurnFacing::Left);
+        const double capturedIconCenterX =
+            (((planeBounds.left + planeBounds.right) * 0.5) - snapshot.monitorBounds.left) * scaleX;
+        const double planeSide = std::max(displayPlaneWidth, displayPlaneHeight);
+        const double bodyAxisGap = std::clamp(planeSide * 0.06, 3.0, 8.0);
+        const double bodyCenterOffset = (displayPlaneWidth * 0.5) + bodyAxisGap;
+        initialFacing = ChooseTurnSafeInitialFacing(
+            initialFacing,
+            capturedIconCenterX,
+            bodyCenterOffset,
+            displayPlaneWidth * 0.5,
+            static_cast<double>(clientBounds_.left),
+            static_cast<double>(clientBounds_.right));
+        const double initialFacingSign = initialFacing == TurnFacing::Right ? 1.0 : -1.0;
+        actor.baseX = capturedIconCenterX - initialFacingSign * bodyCenterOffset;
         actor.baseY = (((planeBounds.top + planeBounds.bottom) * 0.5) - snapshot.monitorBounds.top) * scaleY;
         actor.x = actor.baseX;
         actor.y = actor.baseY;
@@ -1270,19 +1262,18 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.usedPlaneFallback = !hasImageListSize || snapshot.iconDisplay.usedFallback;
         actor.planeSizeSource = planeSizeSource;
         actor.role = static_cast<int>(index);
-        actor.randomState = 0x9E3779B9u ^ (static_cast<std::uint32_t>(index + 1) * 0x85EBCA6Bu);
-        actor.randomState ^= actor.randomState >> 16;
         const double jitter = static_cast<double>(actor.randomState % 41u) / 1000.0;
         actor.awakeningDelay = static_cast<double>(index) * staggerStep + jitter;
         actor.walkSpeed = 58.0 + static_cast<double>((actor.randomState >> 8) % 49u);
-        actor.facing = (actor.randomState & 1u) == 0u ? 1.0 : -1.0;
+        InitializeTurnMotion(actor.turnMotion, initialFacing);
         actor.walkPhase = std::fmod(static_cast<double>(actor.role) * 0.17, 1.0);
         actor.red = colors[index % std::size(colors)][0];
         actor.green = colors[index % std::size(colors)][1];
         actor.blue = colors[index % std::size(colors)][2];
         actor.iconImage = iconImageCache_.Load(icon.image, actor.label);
         actor.usedIconImageFallback = actor.iconImage == nullptr;
-        actor.actionPreviewActor = index == 0 && previewAction_ != ActionId::None;
+        actor.turnPreviewActor = index == 0 && turnPreviewEnabled_;
+        actor.actionPreviewActor = index == 0 && previewAction_ != ActionId::None && !actor.turnPreviewActor;
         actors_.push_back(actor);
     }
 
@@ -1304,8 +1295,11 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     LogInfo(L"icon fight body model: double-sided icon plane; back face keeps non-mirrored icon UV order");
     LogInfo(std::wstring(L"icon fight render shadows: ") + (RenderShadowsEnabled() ? L"enabled" : L"disabled"));
     LogInfo(std::wstring(L"icon fight debug icon plane: ") + (DebugIconPlaneEnabled() ? L"enabled" : L"disabled"));
-    if (previewAction_ != ActionId::None && !actors_.empty()) {
+    if (previewAction_ != ActionId::None && !turnPreviewEnabled_ && !actors_.empty()) {
         LogInfo(L"action preview enabled: " + std::wstring(ActionIdName(previewAction_)));
+    }
+    if (turnPreviewEnabled_ && !actors_.empty()) {
+        LogInfo(L"turn preview enabled");
     }
     size_t boundActorCount = 0;
     size_t labelBoundsActorCount = 0;
@@ -1382,13 +1376,8 @@ void IconFightScene::Update(double elapsedSeconds)
     elapsedSeconds_ = elapsedSeconds;
     for (IconActor& actor : actors_) {
         const auto updateLocomotionWeight = [&actor, deltaSeconds](double targetWeight) {
-            const double blend = 1.0 - std::exp(-deltaSeconds * 10.0);
-            actor.locomotionWeight = LerpValue(actor.locomotionWeight, targetWeight, blend);
-            if (targetWeight <= 0.0 && actor.locomotionWeight < 0.001) {
-                actor.locomotionWeight = 0.0;
-            } else if (targetWeight >= 1.0 && actor.locomotionWeight > 0.999) {
-                actor.locomotionWeight = 1.0;
-            }
+            actor.locomotionWeight = BlendTurnLocomotion(
+                actor.locomotionWeight, targetWeight, deltaSeconds);
         };
         const double actorTime = elapsedSeconds_ - kAwakeningStartSeconds - actor.awakeningDelay;
         if (actorTime < kAwakeningDurationSeconds + kLimbGrowthDurationSeconds) {
@@ -1397,6 +1386,8 @@ void IconFightScene::Update(double elapsedSeconds)
             actor.locomotionWeight = 0.0;
             continue;
         }
+        actor.turnPoseWeight = BlendTurnLocomotion(
+            actor.turnPoseWeight, actor.turnMotion.turning ? 0.0 : 1.0, deltaSeconds);
 
         if (actor.actionPreviewActor) {
             actor.x = actor.baseX;
@@ -1406,7 +1397,8 @@ void IconFightScene::Update(double elapsedSeconds)
                 actor.actionPreviewPauseRemaining = std::max(
                     0.0, actor.actionPreviewPauseRemaining - actionDeltaSeconds);
                 if (actor.actionPreviewPauseRemaining <= 0.0) {
-                    actor.actionPlayer.Start(previewAction_, actor.facing);
+                    const double direction = actor.turnMotion.currentFacing == TurnFacing::Left ? -1.0 : 1.0;
+                    actor.actionPlayer.Start(previewAction_, direction);
                 }
             } else {
                 actor.actionPlayer.Update(actionDeltaSeconds);
@@ -1417,6 +1409,33 @@ void IconFightScene::Update(double elapsedSeconds)
                     actor.actionSample = {};
                     actor.actionPreviewPauseRemaining = 0.55;
                 }
+            }
+            continue;
+        }
+        if (actor.turnPreviewActor) {
+            actor.x = actor.baseX;
+            actor.y = actor.baseY;
+            updateLocomotionWeight(0.0);
+            if (actor.turnMotion.turning) {
+                UpdateTurnMotion(actor.turnMotion, actionDeltaSeconds);
+                if (!actor.turnMotion.turning) {
+                    actor.turnPreviewPauseRemaining = 0.65;
+                }
+            } else {
+                actor.turnPreviewPauseRemaining = std::max(
+                    0.0, actor.turnPreviewPauseRemaining - actionDeltaSeconds);
+                if (actor.turnPreviewPauseRemaining <= 0.0) {
+                    const TurnFacing nextFacing = actor.turnMotion.currentFacing == TurnFacing::Right ?
+                        TurnFacing::Left : TurnFacing::Right;
+                    RequestTurn(actor.turnMotion, nextFacing);
+                }
+            }
+            continue;
+        }
+        if (actor.turnMotion.turning) {
+            updateLocomotionWeight(0.0);
+            if (actor.locomotionWeight <= 0.02) {
+                UpdateTurnMotion(actor.turnMotion, actionDeltaSeconds);
             }
             continue;
         }
@@ -1444,8 +1463,12 @@ void IconFightScene::Update(double elapsedSeconds)
             actor.randomState = actor.randomState * 1664525u + 1013904223u;
             actor.waitRemaining = 0.20 + (static_cast<double>(actor.randomState % 1001u) / 1000.0);
         } else {
+            const TurnFacing desiredFacing = FacingFromDirection(dx);
+            if (RequestTurn(actor.turnMotion, desiredFacing)) {
+                updateLocomotionWeight(0.0);
+                continue;
+            }
             updateLocomotionWeight(1.0);
-            actor.facing = dx < 0.0 ? -1.0 : 1.0;
             actor.x += (dx / distance) * step;
             actor.y += (dy / distance) * step;
             const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));

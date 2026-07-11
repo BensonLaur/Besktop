@@ -1,5 +1,6 @@
 #include "besktop/animation/action_player.h"
 #include "besktop/animation/gait_ik.h"
+#include "besktop/animation/turn_motion.h"
 
 #include <algorithm>
 #include <array>
@@ -235,6 +236,226 @@ void TestMirroringKeepsTimeline()
     Check(std::abs(rightSample.bodyRotateZ + leftSample.bodyRotateZ) < 1e-9, "mirror body rotation");
 }
 
+void TestTurnMotionStateAndGeometry()
+{
+    using namespace besktop;
+    constexpr double pi = 3.14159265358979323846;
+    constexpr double planeSide = 48.0;
+    constexpr double focalLength = 576.0;
+    constexpr double bodyCenterOffset = 27.0;
+
+    Check(ChooseTurnSafeInitialFacing(
+        TurnFacing::Right, 30.0, bodyCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
+        TurnFacing::Left,
+        "left-edge actor starts toward the safe turn arc");
+    Check(ChooseTurnSafeInitialFacing(
+        TurnFacing::Left, 290.0, bodyCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
+        TurnFacing::Right,
+        "right-edge actor starts toward the safe turn arc");
+    Check(ChooseTurnSafeInitialFacing(
+        TurnFacing::Right, 160.0, bodyCenterOffset, planeSide * 0.5, 0.0, 320.0) ==
+        TurnFacing::Right,
+        "actor with room on both sides keeps its preferred facing");
+
+    TurnMotionState sameDirection;
+    InitializeTurnMotion(sameDirection, TurnFacing::Right);
+    Check(!RequestTurn(sameDirection, TurnFacing::Right),
+        "same facing does not start a turn");
+    Check(!sameDirection.turning, "same facing remains stable");
+
+    TurnMotionState rightToLeft;
+    InitializeTurnMotion(rightToLeft, TurnFacing::Right);
+    Check(RequestTurn(rightToLeft, TurnFacing::Left),
+        "opposite facing starts a turn");
+    Check(rightToLeft.currentFacing == TurnFacing::Right,
+        "turn does not commit facing at start");
+    Check(std::abs(SampleTurnYaw(rightToLeft)) < 1e-9,
+        "right-facing turn starts at zero yaw");
+
+    double previousProgress = 0.0;
+    for (int step = 0; step < 8; ++step) {
+        UpdateTurnMotion(rightToLeft, 0.04);
+        Check(rightToLeft.progress >= previousProgress &&
+            rightToLeft.progress >= 0.0 && rightToLeft.progress <= 1.0,
+            "turn progress is monotonic and clamped");
+        Check(rightToLeft.currentFacing == TurnFacing::Right,
+            "turn keeps current facing until completion");
+        previousProgress = rightToLeft.progress;
+    }
+    Check(std::abs(rightToLeft.progress - 0.8) < 1e-9,
+        "turn uses configured duration");
+    UpdateTurnMotion(rightToLeft, 1.0);
+    Check(!rightToLeft.turning, "large delta completes turn");
+    Check(rightToLeft.currentFacing == TurnFacing::Left,
+        "turn commits desired facing at completion");
+    Check(std::abs(rightToLeft.progress - 1.0) < 1e-9 &&
+        std::abs(SampleTurnYaw(rightToLeft) - pi) < 1e-9,
+        "completed turn lands exactly on target yaw");
+
+    TurnMotionState mirroredRight;
+    TurnMotionState mirroredLeft;
+    InitializeTurnMotion(mirroredRight, TurnFacing::Right);
+    InitializeTurnMotion(mirroredLeft, TurnFacing::Left);
+    RequestTurn(mirroredRight, TurnFacing::Left);
+    RequestTurn(mirroredLeft, TurnFacing::Right);
+    for (int step = 0; step <= 10; ++step) {
+        if (step > 0) {
+            UpdateTurnMotion(mirroredRight, 0.04);
+            UpdateTurnMotion(mirroredLeft, 0.04);
+        }
+        Check(std::abs(mirroredRight.progress - mirroredLeft.progress) < 1e-9,
+            "left and right turn progress matches");
+        Check(std::abs(SampleTurnYaw(mirroredRight) +
+            SampleTurnYaw(mirroredLeft) - pi) < 1e-9,
+            "left and right yaw curves mirror");
+    }
+
+    const auto projectedWidth = [=](double yaw) {
+        const TurnProjectedPoint left = ProjectTurnPoint(
+            GaitVec3{bodyCenterOffset - planeSide * 0.5, 0.0, 0.0}, yaw, focalLength);
+        const TurnProjectedPoint right = ProjectTurnPoint(
+            GaitVec3{bodyCenterOffset + planeSide * 0.5, 0.0, 0.0}, yaw, focalLength);
+        return std::abs(right.x - left.x);
+    };
+    const double startWidth = projectedWidth(0.0);
+    const double middleWidth = projectedWidth(pi * 0.5);
+    const double endWidth = projectedWidth(pi);
+    Check(middleWidth < startWidth * 0.05,
+        "turn midpoint becomes a narrow plane edge");
+    Check(std::abs(endWidth - startWidth) < 1e-9,
+        "turn endpoint restores icon width");
+    const GaitVec3 localIconCenter{bodyCenterOffset, 0.0, 0.0};
+    TurnProjectedPoint previousIconCenter = ProjectTurnPoint(
+        localIconCenter, 0.0, focalLength);
+    double maximumIconCenterStep = 0.0;
+    double middleIconCenterX = 0.0;
+    double endIconCenterX = 0.0;
+    for (int frame = 0; frame <= 60; ++frame) {
+        const double yaw = pi * SampleTurnEase(static_cast<double>(frame) / 60.0);
+        const GaitVec3 rotatedCenter = RotateAroundVerticalAxis(localIconCenter, yaw);
+        Check(std::abs(std::hypot(rotatedCenter.x, rotatedCenter.z) - bodyCenterOffset) < 1e-9,
+            "icon center keeps constant radius around body axis");
+        const TurnProjectedPoint projectedCenter = ProjectTurnPoint(
+            localIconCenter, yaw, focalLength);
+        if (frame > 0) {
+            maximumIconCenterStep = std::max(
+                maximumIconCenterStep,
+                std::hypot(
+                    projectedCenter.x - previousIconCenter.x,
+                    projectedCenter.y - previousIconCenter.y));
+        }
+        previousIconCenter = projectedCenter;
+        if (frame == 30) {
+            middleIconCenterX = projectedCenter.x;
+        }
+        if (frame == 60) {
+            endIconCenterX = projectedCenter.x;
+        }
+    }
+    Check(ProjectTurnPoint(localIconCenter, 0.0, focalLength).x > 0.0 && endIconCenterX < 0.0,
+        "icon center finishes on the opposite side of body axis");
+    Check(std::abs(middleIconCenterX) < 1e-9,
+        "icon center passes body axis near the edge-on midpoint");
+    Check(maximumIconCenterStep < planeSide * 0.05,
+        "icon center follows a continuous projected arc");
+
+    const GaitVec3 shoulderCenter{0.0, -planeSide * 0.20, 0.0};
+    const GaitVec3 hipCenter{0.0, planeSide * 0.68, 0.0};
+    const GaitVec3 leftShoulder{0.0, shoulderCenter.y, -planeSide * 0.24};
+    const GaitVec3 rightShoulder{0.0, shoulderCenter.y, planeSide * 0.24};
+    double maximumAnchorStep = 0.0;
+    TurnProjectedPoint previousLeft = ProjectTurnPoint(leftShoulder, 0.0, focalLength);
+    TurnProjectedPoint previousRight = ProjectTurnPoint(rightShoulder, 0.0, focalLength);
+    double depthExchangeProgress = -1.0;
+    double previousDepthDifference =
+        ProjectTurnPoint(rightShoulder, 0.0, focalLength).depth -
+        ProjectTurnPoint(leftShoulder, 0.0, focalLength).depth;
+    for (int frame = 0; frame <= 60; ++frame) {
+        const double progress = static_cast<double>(frame) / 60.0;
+        const double yaw = pi * SampleTurnEase(progress);
+        const TurnProjectedPoint shoulderAxis = ProjectTurnPoint(shoulderCenter, yaw, focalLength);
+        const TurnProjectedPoint hipAxis = ProjectTurnPoint(hipCenter, yaw, focalLength);
+        const TurnProjectedPoint rootAxis = ProjectTurnPoint(GaitVec3{}, yaw, focalLength);
+        Check(std::abs(rootAxis.x) < 1e-9 &&
+            std::abs(shoulderAxis.x) < 1e-9 && std::abs(hipAxis.x) < 1e-9,
+            "shoulder and hip centers keep a stable vertical axis");
+
+        const TurnProjectedPoint left = ProjectTurnPoint(leftShoulder, yaw, focalLength);
+        const TurnProjectedPoint right = ProjectTurnPoint(rightShoulder, yaw, focalLength);
+        if (frame > 0) {
+            maximumAnchorStep = std::max(maximumAnchorStep,
+                std::max(
+                    std::hypot(left.x - previousLeft.x, left.y - previousLeft.y),
+                    std::hypot(right.x - previousRight.x, right.y - previousRight.y)));
+        }
+        previousLeft = left;
+        previousRight = right;
+        const double depthDifference = right.depth - left.depth;
+        if (depthExchangeProgress < 0.0 && previousDepthDifference > 0.0 && depthDifference <= 0.0) {
+            depthExchangeProgress = progress;
+        }
+        previousDepthDifference = depthDifference;
+    }
+    Check(maximumAnchorStep < planeSide * 0.04,
+        "turn anchors move continuously without a one-frame side swap");
+    Check(depthExchangeProgress >= 0.45 && depthExchangeProgress <= 0.55,
+        "front and back limb depth exchanges near turn midpoint");
+
+    const double upperArmLength = planeSide * 0.30;
+    const double forearmLength = planeSide * 0.32;
+    const TwoBoneIkSolution arm = SolveTwoBoneIk(
+        rightShoulder,
+        GaitVec3{rightShoulder.x + 4.0, rightShoulder.y + 22.0, rightShoulder.z + 3.0},
+        upperArmLength,
+        forearmLength,
+        GaitVec3{0.0, 1.0, 0.25});
+    for (const double yaw : {0.0, pi * 0.25, pi * 0.5, pi * 0.75, pi}) {
+        const GaitVec3 root = RotateAroundVerticalAxis(arm.root, yaw);
+        const GaitVec3 joint = RotateAroundVerticalAxis(arm.joint, yaw);
+        const GaitVec3 end = RotateAroundVerticalAxis(arm.end, yaw);
+        Check(std::abs(Distance(root, joint) - upperArmLength) < 1e-6,
+            "turn keeps upper arm length");
+        Check(std::abs(Distance(joint, end) - forearmLength) < 1e-6,
+            "turn keeps forearm length");
+    }
+
+    const double thighLength = planeSide * 0.40;
+    const double shinLength = planeSide * 0.41;
+    const GaitVec3 hip{0.0, planeSide * 0.68, planeSide * 0.22};
+    const TwoBoneIkSolution leg = SolveTwoBoneIk(
+        hip,
+        GaitVec3{hip.x + planeSide * 0.07, hip.y + planeSide * 0.80, hip.z + planeSide * 0.05},
+        thighLength,
+        shinLength,
+        GaitVec3{1.0, 0.0, 0.18});
+    for (const double yaw : {0.0, pi * 0.5, pi}) {
+        const GaitVec3 root = RotateAroundVerticalAxis(leg.root, yaw);
+        const GaitVec3 joint = RotateAroundVerticalAxis(leg.joint, yaw);
+        const GaitVec3 end = RotateAroundVerticalAxis(leg.end, yaw);
+        Check(std::abs(Distance(root, joint) - thighLength) < 1e-6,
+            "turn keeps thigh length");
+        Check(std::abs(Distance(joint, end) - shinLength) < 1e-6,
+            "turn keeps shin length");
+    }
+
+    double locomotionWeight = 1.0;
+    for (int step = 0; step < 40; ++step) {
+        locomotionWeight = BlendTurnLocomotion(locomotionWeight, 0.0, 1.0 / 60.0);
+    }
+    Check(locomotionWeight < 0.01, "turn can blend gait out to a planted pose");
+    for (int step = 0; step < 50; ++step) {
+        locomotionWeight = BlendTurnLocomotion(locomotionWeight, 1.0, 1.0 / 60.0);
+    }
+    Check(locomotionWeight > 0.99, "gait can resume after turn completion");
+
+    std::cout << "turn metrics: duration=0.4, widths="
+              << startWidth << "/" << middleWidth << "/" << endWidth
+              << ", icon radius=" << bodyCenterOffset
+              << ", icon max step=" << maximumIconCenterStep
+              << ", max anchor step=" << maximumAnchorStep
+              << ", depth exchange=" << depthExchangeProgress << '\n';
+}
+
 double Distance(const besktop::GaitVec3& first, const besktop::GaitVec3& second)
 {
     const double dx = first.x - second.x;
@@ -384,6 +605,7 @@ int main()
     TestMirroringKeepsTimeline();
     TestSideKickGeometryAndEvents();
     TestGaitGeometry();
+    TestTurnMotionStateAndGeometry();
     if (failures == 0) {
         std::cout << "besktop_action_tests: all checks passed\n";
     }

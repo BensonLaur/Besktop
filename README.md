@@ -121,9 +121,10 @@ $env:BESKTOP_DEBUG_ICON_PLANE='1'   # 显示图标薄片调试边框
 $env:BESKTOP_RENDER_SHADOWS='1'     # 显示开发期阴影效果
 $env:BESKTOP_MAX_ACTORS='10'        # 仅创建前 10 个演员；未设置或设为 0 时全部觉醒
 $env:BESKTOP_ACTION_PREVIEW='lead_straight' # 首演员原地循环预览动作
+$env:BESKTOP_TURN_PREVIEW='1'       # 首演员原地循环预览连续 3D 转身
 ```
 
-阶段 A 已支持 `lead_straight`、`layback`、`light_hit_react` 三个预览 ID。预览会等待首个演员完成觉醒和四肢生长，再暂停该演员的随机漫游并循环播放；推荐配合 `BESKTOP_MAX_ACTORS=1` 和 `BESKTOP_ANIMATION_SPEED=0.5` 观察。未设置预览时，现有全量觉醒与自由漫游行为不变。
+阶段 A 已支持 `lead_straight`、`layback`、`light_hit_react`、`side_kick` 四个动作预览 ID。预览会等待首个演员完成觉醒和四肢生长，再暂停该演员的随机漫游并循环播放；推荐配合 `BESKTOP_MAX_ACTORS=1` 和 `BESKTOP_ANIMATION_SPEED=0.5` 观察。`BESKTOP_TURN_PREVIEW=1` 使用同一诊断约定循环展示左右连续转身；未设置预览时，现有全量觉醒与自由漫游行为不变。
 
 普通 Release 构建会忽略上述单项变量，并固定使用 `1.0x` 动画速度和 `0` 秒偏移。需要现场诊断时，必须先显式设置总开关，再设置所需单项：
 
