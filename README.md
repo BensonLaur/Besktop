@@ -119,6 +119,7 @@ $env:BESKTOP_ANIMATION_SPEED='0.5' # 0.5 倍速慢放观察动作，默认 1.0
 $env:BESKTOP_ANIMATION_OFFSET='4.5' # 从动画第 4.5 秒开始，便于直接观察某个动作阶段
 $env:BESKTOP_DEBUG_ICON_PLANE='1'   # 显示图标薄片调试边框
 $env:BESKTOP_RENDER_SHADOWS='1'     # 显示开发期阴影效果
+$env:BESKTOP_MAX_ACTORS='10'        # 仅创建前 10 个演员；未设置或设为 0 时全部觉醒
 ```
 
 普通 Release 构建会忽略上述单项变量，并固定使用 `1.0x` 动画速度和 `0` 秒偏移。需要现场诊断时，必须先显式设置总开关，再设置所需单项：

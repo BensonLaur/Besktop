@@ -179,6 +179,7 @@ packs/
 - `BESKTOP_FRAME_TRACE=1`：记录首帧绘制、壁纸缓存和关键渲染阶段，用于定位首帧卡顿或异常。
 - `BESKTOP_ANIMATION_SPEED=<倍率>`：控制动画时间倍率，默认 `1.0`，建议允许慢放观察动作细节。
 - `BESKTOP_ANIMATION_OFFSET=<秒>`：设置动画起始偏移，默认 `0.0`，用于直接观察左走、右走、转身、拳击等指定阶段。
+- `BESKTOP_MAX_ACTORS=<数量>`：限制本次创建的演员数量，用于比较不同桌面图标规模下的渲染性能；未设置或设为 `0` 时创建全部演员。
 
 Debug 构建通过 `BESKTOP_DEVELOPER_BUILD` 明确标记开发者能力，默认允许读取各项诊断环境变量并记录详细 Info 日志。普通 Release 固定使用 `1.0x` 动画速度和 `0` 秒偏移，默认关闭帧率统计、分段 trace 和图标平面调试，并只记录 Warning/Error；过滤掉的 Info 不会触发日志文件创建。
 

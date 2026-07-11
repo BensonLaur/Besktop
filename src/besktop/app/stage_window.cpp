@@ -183,6 +183,8 @@ bool StageWindow::Create(int showCommand)
     LogInfo(std::wstring(L"diagnostics: ") + (options_.diagnosticsEnabled ? L"enabled" : L"disabled"));
     LogInfo(std::wstring(L"frame stats: ") + (options_.frameStatsEnabled ? L"enabled" : L"disabled"));
     LogInfo(std::wstring(L"frame trace: ") + (options_.frameTraceEnabled ? L"enabled" : L"disabled"));
+    LogInfo(L"actor limit: " +
+        (options_.maxActors > 0 ? std::to_wstring(options_.maxActors) : std::wstring(L"all")));
     LogInfo(L"animation speed: " + FormatDouble(options_.animationSpeed, 2) + L"x");
     LogInfo(L"animation offset: " + FormatDouble(options_.animationOffsetSeconds, 2) + L"s");
 

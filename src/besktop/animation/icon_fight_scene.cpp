@@ -1118,7 +1118,11 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         }
     }
 
-    const size_t count = snapshot.icons.size();
+    const size_t availableCount = snapshot.icons.size();
+    const unsigned int configuredMaxActors = besktop::GetRuntimeOptions().maxActors;
+    const size_t count = configuredMaxActors > 0 ?
+        std::min(availableCount, static_cast<size_t>(configuredMaxActors)) :
+        availableCount;
     const double staggerStep = count > 1 ? std::clamp(2.4 / static_cast<double>(count - 1), 0.05, 0.12) : 0.0;
     for (size_t index = 0; index < count; ++index) {
         const DesktopIconSnapshot& icon = snapshot.icons[index];

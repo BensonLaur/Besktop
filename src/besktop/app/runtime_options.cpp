@@ -42,6 +42,26 @@ double ReadEnvironmentDouble(const wchar_t* name, double fallback, double minimu
     return std::clamp(parsed, minimum, maximum);
 }
 
+unsigned int ReadEnvironmentUnsigned(const wchar_t* name, unsigned int fallback, unsigned int maximum)
+{
+    wchar_t value[32]{};
+    const DWORD length = GetEnvironmentVariableW(name, value, static_cast<DWORD>(std::size(value)));
+    if (length == 0 || length >= std::size(value)) {
+        return fallback;
+    }
+
+    if (value[0] == L'-') {
+        return fallback;
+    }
+
+    wchar_t* end = nullptr;
+    const unsigned long parsed = wcstoul(value, &end, 10);
+    if (end == value || *end != L'\0') {
+        return fallback;
+    }
+    return static_cast<unsigned int>(std::min<unsigned long>(parsed, maximum));
+}
+
 } // namespace
 
 namespace besktop {
@@ -64,6 +84,7 @@ RuntimeOptions LoadRuntimeOptions()
     options.frameTraceEnabled = ReadTruthyEnvironmentFlag(L"BESKTOP_FRAME_TRACE");
     options.debugIconPlaneEnabled = ReadTruthyEnvironmentFlag(L"BESKTOP_DEBUG_ICON_PLANE");
     options.renderShadowsEnabled = ReadTruthyEnvironmentFlag(L"BESKTOP_RENDER_SHADOWS");
+    options.maxActors = ReadEnvironmentUnsigned(L"BESKTOP_MAX_ACTORS", 0, 10000);
     options.animationSpeed = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_SPEED", 1.0, 0.05, 8.0);
     options.animationOffsetSeconds = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_OFFSET", 0.0, 0.0, 3600.0);
     return options;
