@@ -52,6 +52,7 @@ public:
         double labelAlpha = 1.0;
         double gait = 0.0;
         double walkPhase = 0.0;
+        double locomotionWeight = 0.0;
         Heading heading = Heading::MoveRight;
         bool attackingRight = true;
         ActionSample action{};
@@ -84,7 +85,8 @@ public:
         double walkSpeed = 80.0;
         double waitRemaining = 0.0;
         double awakeningDelay = 0.0;
-        double localElapsed = 0.0;
+        double walkPhase = 0.0;
+        double locomotionWeight = 0.0;
         double facing = 1.0;
         std::uint32_t randomState = 1;
         RECT labelBounds{};

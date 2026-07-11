@@ -1,5 +1,6 @@
 #include "besktop/animation/icon_fight_scene.h"
 
+#include "besktop/animation/gait_ik.h"
 #include "besktop/app/runtime_options.h"
 #include "besktop/logging/logger.h"
 
@@ -80,7 +81,6 @@ bool DebugIconPlaneEnabled()
 }
 
 double LerpValue(double from, double to, double t);
-double Wrap01(double value);
 
 Gdiplus::Color WithAlpha(unsigned char alpha, unsigned char red, unsigned char green, unsigned char blue)
 {
@@ -245,36 +245,6 @@ enum class LimbLayer {
     Front,
 };
 
-struct WalkLegSample {
-    double phase = 0.0;
-    bool stance = true;
-    double footOffset = 0.0;
-    double footLift = 0.0;
-    double plantWeight = 1.0;
-};
-
-WalkLegSample SampleWalkLeg(double walkPhase, double phaseOffset, double stride, double stepHeight)
-{
-    constexpr double kStanceRatio = 0.60;
-    WalkLegSample sample;
-    sample.phase = Wrap01(walkPhase + phaseOffset);
-    sample.stance = sample.phase < kStanceRatio;
-
-    if (sample.stance) {
-        const double t = sample.phase / kStanceRatio;
-        sample.footOffset = LerpValue(stride * 0.45, -stride * 0.45, t);
-        sample.footLift = 0.0;
-        sample.plantWeight = 1.0;
-        return sample;
-    }
-
-    const double swingT = (sample.phase - kStanceRatio) / (1.0 - kStanceRatio);
-    sample.footOffset = LerpValue(-stride * 0.45, stride * 0.45, SmoothStep(0.0, 1.0, swingT));
-    sample.footLift = std::sin(swingT * kPi) * stepHeight;
-    sample.plantWeight = 0.0;
-    return sample;
-}
-
 ActorPose BuildLegacyPose(const besktop::IconFightScene::IconActor& actor, double elapsedSeconds)
 {
     constexpr double kWalkStartSeconds = 1.80;
@@ -288,6 +258,7 @@ ActorPose BuildLegacyPose(const besktop::IconFightScene::IconActor& actor, doubl
     pose.limbGrow = SmoothStep(1.05, 1.75, elapsedSeconds);
     pose.labelAlpha = 1.0 - SmoothStep(1.18, 1.86, elapsedSeconds);
     pose.walkPhase = std::fmod(std::max(0.0, elapsedSeconds - kWalkStartSeconds) * 1.75 + actor.role * 0.17, 1.0);
+    pose.locomotionWeight = SmoothStep(0.0, 0.55, std::max(0.0, elapsedSeconds - kWalkStartSeconds));
     pose.gait = std::sin((pose.walkPhase * 2.0 * kPi));
     pose.heading = actor.role % 2 == 0 ? ActorPose::Heading::MoveRight : ActorPose::Heading::MoveLeft;
     pose.facing = pose.heading == ActorPose::Heading::MoveLeft ? -1.0 : 1.0;
@@ -346,10 +317,13 @@ ActorPose BuildLegacyPose(const besktop::IconFightScene::IconActor& actor, doubl
         pose.attackingRight = false;
     }
 
-    const WalkLegSample rightStep = SampleWalkLeg(pose.walkPhase, 0.0, 1.0, 1.0);
-    const WalkLegSample leftStep = SampleWalkLeg(pose.walkPhase, 0.5, 1.0, 1.0);
+    const besktop::GaitGeometry gaitGeometry = besktop::BuildGaitGeometry(planeSide, planeSide * 0.40, planeSide * 0.41);
+    const besktop::GaitLegSample rightStep = besktop::SampleGaitLeg(pose.walkPhase, 0.0, gaitGeometry, 1.0);
+    const besktop::GaitLegSample leftStep = besktop::SampleGaitLeg(pose.walkPhase, 0.5, gaitGeometry, 1.0);
     const double doublePlant = std::clamp(rightStep.plantWeight + leftStep.plantWeight - 1.0, 0.0, 1.0);
-    const double swingLift = std::max(rightStep.footLift, leftStep.footLift);
+    const double swingLift = gaitGeometry.stepHeight > 0.0 ?
+        std::max(rightStep.footLift, leftStep.footLift) / gaitGeometry.stepHeight :
+        0.0;
     const double bobAmplitude = std::clamp(planeSide * 0.035, 2.0, 4.5);
     pose.x = LerpValue(actor.baseX, patrolX, intro);
     pose.y = LerpValue(actor.baseY, centerY, intro);
@@ -377,8 +351,9 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
         kAwakeningDurationSeconds * 0.55,
         kAwakeningDurationSeconds + kLimbGrowthDurationSeconds,
         actorTime);
-    pose.walkPhase = std::fmod(std::max(0.0, actor.localElapsed) * 1.75 + actor.role * 0.17, 1.0);
-    pose.gait = std::sin(pose.walkPhase * 2.0 * kPi);
+    pose.walkPhase = actor.walkPhase;
+    pose.locomotionWeight = actor.locomotionWeight;
+    pose.gait = std::sin(pose.walkPhase * 2.0 * kPi) * pose.locomotionWeight;
     pose.facing = actor.facing;
     pose.heading = actor.facing < 0.0 ? ActorPose::Heading::MoveLeft : ActorPose::Heading::MoveRight;
     pose.attackingRight = actor.facing > 0.0;
@@ -386,16 +361,23 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
     pose.rotateY = DegreesToRadians(actor.facing * 5.0 * pose.limbGrow);
     pose.rotateZ = DegreesToRadians(std::sin((actorTime * 3.0) + actor.role) * 2.0 * pose.bodyEffect);
 
-    if (wandering && actor.waitRemaining <= 0.0 && !actor.actionPreviewActor) {
+    if (wandering && pose.locomotionWeight > 0.001 && !actor.actionPreviewActor) {
         const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
-        const WalkLegSample rightStep = SampleWalkLeg(pose.walkPhase, 0.0, 1.0, 1.0);
-        const WalkLegSample leftStep = SampleWalkLeg(pose.walkPhase, 0.5, 1.0, 1.0);
+        const besktop::GaitGeometry gaitGeometry = besktop::BuildGaitGeometry(planeSide, planeSide * 0.40, planeSide * 0.41);
+        const besktop::GaitLegSample rightStep = besktop::SampleGaitLeg(
+            pose.walkPhase, 0.0, gaitGeometry, pose.locomotionWeight);
+        const besktop::GaitLegSample leftStep = besktop::SampleGaitLeg(
+            pose.walkPhase, 0.5, gaitGeometry, pose.locomotionWeight);
         const double doublePlant = std::clamp(rightStep.plantWeight + leftStep.plantWeight - 1.0, 0.0, 1.0);
-        const double swingLift = std::max(rightStep.footLift, leftStep.footLift);
+        const double swingLift = gaitGeometry.stepHeight > 0.0 ?
+            std::max(rightStep.footLift, leftStep.footLift) / gaitGeometry.stepHeight :
+            0.0;
         const double bobAmplitude = std::clamp(planeSide * 0.035, 2.0, 4.5);
-        pose.bob = ((doublePlant * 0.70) - (swingLift * 0.85)) * bobAmplitude;
-        pose.rotateX += DegreesToRadians(std::cos(pose.walkPhase * 2.0 * kPi) * 2.4);
-        pose.rotateZ += DegreesToRadians(actor.facing * std::sin(pose.walkPhase * 2.0 * kPi) * 2.8);
+        pose.bob = ((doublePlant * 0.70) - (swingLift * 0.85)) * bobAmplitude * pose.locomotionWeight;
+        pose.rotateX += DegreesToRadians(
+            std::cos(pose.walkPhase * 2.0 * kPi) * 2.4 * pose.locomotionWeight);
+        pose.rotateZ += DegreesToRadians(
+            actor.facing * std::sin(pose.walkPhase * 2.0 * kPi) * 2.8 * pose.locomotionWeight);
     }
     pose.action = actor.actionSample;
     const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
@@ -460,11 +442,7 @@ struct Vec2 {
     double y = 0.0;
 };
 
-struct Vec3 {
-    double x = 0.0;
-    double y = 0.0;
-    double z = 0.0;
-};
+using Vec3 = besktop::GaitVec3;
 
 struct ProjectedPoint {
     Gdiplus::PointF point{};
@@ -644,15 +622,6 @@ double HeadingSign(const ActorPose& pose)
     return pose.facing < 0.0 ? -1.0 : 1.0;
 }
 
-double Wrap01(double value)
-{
-    double wrapped = std::fmod(value, 1.0);
-    if (wrapped < 0.0) {
-        wrapped += 1.0;
-    }
-    return wrapped;
-}
-
 LocalJointChain BuildLocalChain(
     const Vec3& root,
     double firstLength,
@@ -674,45 +643,14 @@ LocalJointChain BuildTwoBoneIkChain(
     const Vec3& target,
     double firstLength,
     double secondLength,
-    double bendSign,
-    double kneeDepth)
+    const Vec3& bendHint)
 {
-    const double dx = target.x - root.x;
-    const double dy = target.y - root.y;
-    double distance = std::sqrt((dx * dx) + (dy * dy));
-    double ux = 0.0;
-    double uy = 1.0;
-    if (distance > 0.001) {
-        ux = dx / distance;
-        uy = dy / distance;
-    } else {
-        distance = 0.001;
-    }
-
-    const double minReach = std::max(1.0, std::abs(firstLength - secondLength) + 0.5);
-    const double maxReach = std::max(minReach + 0.5, firstLength + secondLength - 0.5);
-    const double clampedDistance = std::clamp(distance, minReach, maxReach);
-    const double base = std::clamp(
-        ((firstLength * firstLength) - (secondLength * secondLength) + (clampedDistance * clampedDistance)) /
-            (2.0 * clampedDistance),
-        0.0,
-        firstLength);
-    const double height = std::sqrt(std::max(0.0, (firstLength * firstLength) - (base * base)));
-    const double px = -uy;
-    const double py = ux;
-
+    const besktop::TwoBoneIkSolution solved = besktop::SolveTwoBoneIk(
+        root, target, firstLength, secondLength, bendHint);
     LocalJointChain chain;
-    chain.root = root;
-    chain.end = Vec3{
-        root.x + (ux * clampedDistance),
-        root.y + (uy * clampedDistance),
-        target.z,
-    };
-    chain.joint = Vec3{
-        root.x + (ux * base) + (px * bendSign * height),
-        root.y + (uy * base) + (py * bendSign * height),
-        ((root.z + chain.end.z) * 0.5) + kneeDepth,
-    };
+    chain.root = solved.root;
+    chain.joint = solved.joint;
+    chain.end = solved.end;
     return chain;
 }
 
@@ -721,6 +659,25 @@ JointChain ProjectJointChain(const LocalJointChain& local, const ActorPose& pose
     const ProjectedPoint root = ProjectActorPoint(local.root, pose, planeSide);
     const ProjectedPoint joint = ProjectActorPoint(local.joint, pose, planeSide);
     const ProjectedPoint end = ProjectActorPoint(local.end, pose, planeSide);
+
+    JointChain chain;
+    chain.root = root.point;
+    chain.joint = joint.point;
+    chain.end = end.point;
+    chain.depth = (root.depth + joint.depth + end.depth) / 3.0;
+    chain.frontLayer = chain.depth >= 0.0;
+    return chain;
+}
+
+JointChain ProjectLegChain(
+    const LocalJointChain& local,
+    const ActorPose& rootPose,
+    const ActorPose& lowerBodyPose,
+    double planeSide)
+{
+    const ProjectedPoint root = ProjectActorPoint(local.root, rootPose, planeSide);
+    const ProjectedPoint joint = ProjectActorPoint(local.joint, lowerBodyPose, planeSide);
+    const ProjectedPoint end = ProjectActorPoint(local.end, lowerBodyPose, planeSide);
 
     JointChain chain;
     chain.root = root.point;
@@ -742,19 +699,25 @@ JointChain BuildArmChain(
     bool leadArm)
 {
     const double headingSign = HeadingSign(pose);
-    const double stride = std::clamp(planeSide * 0.42, 28.0, 50.0);
-    const double stepHeight = std::clamp(planeSide * 0.18, 10.0, 21.0);
-    const WalkLegSample oppositeLeg = SampleWalkLeg(pose.walkPhase, sideSign > 0 ? 0.5 : 0.0, stride, stepHeight);
-    const double strideScale = std::max(1.0, stride * 0.45);
-    double forward = headingSign * std::clamp(oppositeLeg.footOffset / strideScale, -1.0, 1.0);
+    const besktop::GaitGeometry gaitGeometry = besktop::BuildGaitGeometry(
+        planeSide, planeSide * 0.40, planeSide * 0.41);
+    const besktop::GaitLegSample oppositeLeg = besktop::SampleGaitLeg(
+        pose.walkPhase,
+        sideSign > 0 ? 0.5 : 0.0,
+        gaitGeometry,
+        pose.locomotionWeight);
+    const double strideScale = std::max(1.0, gaitGeometry.stride * 0.45);
+    double forward = headingSign * std::clamp(oppositeLeg.footForward / strideScale, -1.0, 1.0);
     if (pose.heading == ActorPose::Heading::FacingOut) {
-        forward = sideSign * 0.46 + (oppositeLeg.footOffset / strideScale) * 0.14;
+        forward = sideSign * 0.46 + (oppositeLeg.footForward / strideScale) * 0.14;
     }
     if (pose.heading == ActorPose::Heading::MoveRight) {
         forward = -forward;
     }
 
-    const double lift = stepHeight > 0.0 ? oppositeLeg.footLift / stepHeight : 0.0;
+    const double lift = gaitGeometry.stepHeight > 0.0 ?
+        oppositeLeg.footLift / gaitGeometry.stepHeight :
+        0.0;
     double upperAngleDegrees = 94.0 - (forward * 25.0) - (lift * 3.0);
     double foreAngleDegrees = 108.0 - (forward * 17.0) + (lift * 4.0);
     if (pose.heading == ActorPose::Heading::MoveRight) {
@@ -788,8 +751,7 @@ JointChain BuildArmChain(
             target,
             upperArmLength,
             forearmLength,
-            -headingSign * 0.75,
-            depthSign * planeSide * 0.035);
+            Vec3{0.0, 1.0, depthSign * 0.25});
         const double weight = Clamp01(action.handTargetWeight);
         local.joint.x = LerpValue(local.joint.x, actionChain.joint.x, weight);
         local.joint.y = LerpValue(local.joint.y, actionChain.joint.y, weight);
@@ -806,31 +768,36 @@ JointChain BuildLegChain(
     int sideSign,
     double depthSign,
     const ActorPose& pose,
+    const ActorPose& lowerBodyPose,
     double planeSide,
     double thighLength,
     double shinLength)
 {
     const double headingSign = HeadingSign(pose);
-    const double stride = std::clamp(planeSide * 0.34, 22.0, 42.0);
-    const double stepHeight = std::clamp(planeSide * 0.19, 12.0, 23.0);
-    const double legDrop = (thighLength + shinLength) * 0.78;
-    const WalkLegSample sample = SampleWalkLeg(pose.walkPhase, sideSign > 0 ? 0.0 : 0.5, stride, stepHeight);
-    const double groundY = hip.y + legDrop;
-    const double footInward = std::clamp(planeSide * 0.10, 6.0, 14.0);
-    const double footStrideScale = 0.55;
-    const double footBaseX = hip.x - (headingSign * footInward);
+    const besktop::GaitGeometry gaitGeometry = besktop::BuildGaitGeometry(
+        planeSide, thighLength, shinLength);
+    const besktop::GaitLegSample sample = besktop::SampleGaitLeg(
+        pose.walkPhase,
+        sideSign > 0 ? 0.0 : 0.5,
+        gaitGeometry,
+        pose.locomotionWeight);
+    const double groundY = hip.y + gaitGeometry.legDrop;
+    const double neutralSplit =
+        static_cast<double>(sideSign) * gaitGeometry.stride * 0.10 * (1.0 - pose.locomotionWeight);
 
     Vec3 footTarget{
-        footBaseX + (headingSign * sample.footOffset * footStrideScale),
+        hip.x + neutralSplit + (headingSign * sample.footForward),
         groundY - sample.footLift,
-        hip.z + (depthSign * planeSide * 0.050),
+        hip.z + (depthSign * gaitGeometry.footDepth),
     };
-    double bendSign = -headingSign * 0.65;
+    Vec3 bendHint{headingSign, 0.0, depthSign * 0.18};
     if (pose.heading == ActorPose::Heading::FacingOut) {
-        footTarget.x = hip.x + (sideSign * stride * 0.14) + (headingSign * sample.footOffset * 0.10);
+        footTarget.x = hip.x +
+            (sideSign * gaitGeometry.stride * 0.10 * pose.locomotionWeight) +
+            (headingSign * sample.footForward * 0.10);
         footTarget.y = groundY - (sample.footLift * 0.55);
-        footTarget.z = hip.z + (depthSign * planeSide * 0.13);
-        bendSign = static_cast<double>(sideSign) * 0.65;
+        footTarget.z = hip.z + (depthSign * planeSide * 0.10);
+        bendHint = Vec3{static_cast<double>(sideSign), 0.0, depthSign * 0.18};
     }
 
     const LocalJointChain local = BuildTwoBoneIkChain(
@@ -838,9 +805,8 @@ JointChain BuildLegChain(
         footTarget,
         thighLength,
         shinLength,
-        bendSign,
-        depthSign * planeSide * 0.035);
-    return ProjectJointChain(local, pose, planeSide);
+        bendHint);
+    return ProjectLegChain(local, pose, lowerBodyPose, planeSide);
 }
 
 LimbPose BuildLimbPose(
@@ -873,6 +839,11 @@ LimbPose BuildLimbPose(
     const double forearmLength = planeSide * 0.32;
     const double thighLength = planeSide * 0.40;
     const double shinLength = planeSide * 0.41;
+    ActorPose lowerBodyPose = pose;
+    constexpr double kLowerBodyActionRotation = 0.18;
+    lowerBodyPose.rotateX -= pose.action.bodyRotateX * (1.0 - kLowerBodyActionRotation);
+    lowerBodyPose.rotateY -= pose.action.bodyRotateY * (1.0 - kLowerBodyActionRotation);
+    lowerBodyPose.rotateZ -= pose.action.bodyRotateZ * (1.0 - kLowerBodyActionRotation);
 
     LimbPose limbs;
     const bool rightLead = rightFront;
@@ -880,8 +851,10 @@ LimbPose BuildLimbPose(
         leftShoulder, -1, leftDepthSign, pose, planeSide, upperArmLength, forearmLength, !rightLead);
     limbs.rightArm = BuildArmChain(
         rightShoulder, 1, rightDepthSign, pose, planeSide, upperArmLength, forearmLength, rightLead);
-    limbs.leftLeg = BuildLegChain(leftHip, -1, leftDepthSign, pose, planeSide, thighLength, shinLength);
-    limbs.rightLeg = BuildLegChain(rightHip, 1, rightDepthSign, pose, planeSide, thighLength, shinLength);
+    limbs.leftLeg = BuildLegChain(
+        leftHip, -1, leftDepthSign, pose, lowerBodyPose, planeSide, thighLength, shinLength);
+    limbs.rightLeg = BuildLegChain(
+        rightHip, 1, rightDepthSign, pose, lowerBodyPose, planeSide, thighLength, shinLength);
     return limbs;
 }
 
@@ -918,7 +891,9 @@ void DrawActorLimbs(
     const ActorPose& pose,
     const BodyProjection& body,
     const LimbPose& limbs,
-    LimbLayer layer)
+    LimbLayer layer,
+    Gdiplus::Pen* sharedLimb,
+    float sharedLimbWidth)
 {
     if (pose.limbGrow <= 0.01) {
         return;
@@ -931,10 +906,6 @@ void DrawActorLimbs(
     const float limbWidth = ToFloat(std::clamp(planeSide * 0.072, 5.0, 8.5));
     const bool renderShadows = RenderShadowsEnabled();
 
-    Gdiplus::Pen limb(Gdiplus::Color(alpha, 250, 253, 255), limbWidth);
-    limb.SetStartCap(Gdiplus::LineCapRound);
-    limb.SetEndCap(Gdiplus::LineCapRound);
-
     const JointChain* chains[] = {
         &limbs.leftArm,
         &limbs.rightArm,
@@ -942,22 +913,35 @@ void DrawActorLimbs(
         &limbs.rightLeg,
     };
 
-    const auto drawChains = [&](Gdiplus::Pen* shadow) {
+    const auto drawChains = [&](Gdiplus::Pen* shadow, Gdiplus::Pen& limb) {
         for (const JointChain* chain : chains) {
-        const bool shouldDraw = layer == LimbLayer::Front ? chain->frontLayer : !chain->frontLayer;
-        if (shouldDraw) {
+            const bool shouldDraw = layer == LimbLayer::Front ? chain->frontLayer : !chain->frontLayer;
+            if (shouldDraw) {
                 DrawJointChain(graphics, *chain, shadow, limb);
             }
         }
     };
 
-    if (renderShadows) {
-        Gdiplus::Pen shadow(Gdiplus::Color(static_cast<BYTE>(alpha * 0.28), 0, 0, 0), limbWidth + 3.8f);
-        shadow.SetStartCap(Gdiplus::LineCapRound);
-        shadow.SetEndCap(Gdiplus::LineCapRound);
-        drawChains(&shadow);
+    const bool canUseSharedLimb = sharedLimb != nullptr &&
+        !renderShadows &&
+        pose.limbGrow >= 0.999 &&
+        std::abs(limbWidth - sharedLimbWidth) < 0.01f;
+    if (canUseSharedLimb) {
+        drawChains(nullptr, *sharedLimb);
     } else {
-        drawChains(nullptr);
+        Gdiplus::Pen limb(Gdiplus::Color(alpha, 250, 253, 255), limbWidth);
+        limb.SetStartCap(Gdiplus::LineCapRound);
+        limb.SetEndCap(Gdiplus::LineCapRound);
+        if (renderShadows) {
+            Gdiplus::Pen shadow(
+                Gdiplus::Color(static_cast<BYTE>(alpha * 0.28), 0, 0, 0),
+                limbWidth + 3.8f);
+            shadow.SetStartCap(Gdiplus::LineCapRound);
+            shadow.SetEndCap(Gdiplus::LineCapRound);
+            drawChains(&shadow, limb);
+        } else {
+            drawChains(nullptr, limb);
+        }
     }
 
     if (layer == LimbLayer::Front) {
@@ -1271,6 +1255,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.awakeningDelay = static_cast<double>(index) * staggerStep + jitter;
         actor.walkSpeed = 58.0 + static_cast<double>((actor.randomState >> 8) % 49u);
         actor.facing = (actor.randomState & 1u) == 0u ? 1.0 : -1.0;
+        actor.walkPhase = std::fmod(static_cast<double>(actor.role) * 0.17, 1.0);
         actor.red = colors[index % std::size(colors)][0];
         actor.green = colors[index % std::size(colors)][1];
         actor.blue = colors[index % std::size(colors)][2];
@@ -1294,7 +1279,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
 
     LogInfo(L"icon fight scene reset; actors: " + std::to_wstring(actors_.size()));
     LogInfo(L"icon fight desktop label font: " + DesktopIconLabelFontDescription());
-    LogInfo(L"icon fight limb model: local 3D foot plant locomotion; stance=0.60, shared side attach shoulder/hip roots; two-bone leg IK; upperArm=0.30 planeSide, forearm=0.32, thigh=0.40, shin=0.41; bodySideInset=0.035, hipExtraOut=0.0, hipDownOut=0.18");
+    LogInfo(L"icon fight limb model: distance-driven gait; stance=0.62, locomotion blend; fixed-length 3D two-bone IK; upperArm=0.30 planeSide, forearm=0.32, thigh=0.40, shin=0.41; stride=0.68 planeSide, stepHeight=0.14 planeSide, legDrop=0.994 totalLegLength");
     LogInfo(L"icon fight body model: double-sided icon plane; back face keeps non-mirrored icon UV order");
     LogInfo(std::wstring(L"icon fight render shadows: ") + (RenderShadowsEnabled() ? L"enabled" : L"disabled"));
     LogInfo(std::wstring(L"icon fight debug icon plane: ") + (DebugIconPlaneEnabled() ? L"enabled" : L"disabled"));
@@ -1375,17 +1360,27 @@ void IconFightScene::Update(double elapsedSeconds)
     previousElapsedSeconds_ = elapsedSeconds;
     elapsedSeconds_ = elapsedSeconds;
     for (IconActor& actor : actors_) {
+        const auto updateLocomotionWeight = [&actor, deltaSeconds](double targetWeight) {
+            const double blend = 1.0 - std::exp(-deltaSeconds * 10.0);
+            actor.locomotionWeight = LerpValue(actor.locomotionWeight, targetWeight, blend);
+            if (targetWeight <= 0.0 && actor.locomotionWeight < 0.001) {
+                actor.locomotionWeight = 0.0;
+            } else if (targetWeight >= 1.0 && actor.locomotionWeight > 0.999) {
+                actor.locomotionWeight = 1.0;
+            }
+        };
         const double actorTime = elapsedSeconds_ - kAwakeningStartSeconds - actor.awakeningDelay;
         if (actorTime < kAwakeningDurationSeconds + kLimbGrowthDurationSeconds) {
             actor.x = actor.baseX;
             actor.y = actor.baseY;
+            actor.locomotionWeight = 0.0;
             continue;
         }
 
-        actor.localElapsed += deltaSeconds;
         if (actor.actionPreviewActor) {
             actor.x = actor.baseX;
             actor.y = actor.baseY;
+            updateLocomotionWeight(0.0);
             if (actor.actionPlayer.State().actionId == ActionId::None) {
                 actor.actionPreviewPauseRemaining = std::max(
                     0.0, actor.actionPreviewPauseRemaining - actionDeltaSeconds);
@@ -1405,6 +1400,7 @@ void IconFightScene::Update(double elapsedSeconds)
             continue;
         }
         if (actor.waitRemaining > 0.0) {
+            updateLocomotionWeight(0.0);
             actor.waitRemaining = std::max(0.0, actor.waitRemaining - deltaSeconds);
             if (actor.waitRemaining <= 0.0) {
                 ChooseWanderTarget(actor);
@@ -1417,14 +1413,24 @@ void IconFightScene::Update(double elapsedSeconds)
         const double distance = std::sqrt((dx * dx) + (dy * dy));
         const double step = actor.walkSpeed * deltaSeconds;
         if (distance <= std::max(1.0, step)) {
+            const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+            const GaitGeometry gaitGeometry = BuildGaitGeometry(
+                planeSide, planeSide * 0.40, planeSide * 0.41);
+            actor.walkPhase = WrapGaitPhase(actor.walkPhase + distance / gaitGeometry.cycleTravel);
             actor.x = actor.targetX;
             actor.y = actor.targetY;
+            updateLocomotionWeight(0.0);
             actor.randomState = actor.randomState * 1664525u + 1013904223u;
             actor.waitRemaining = 0.20 + (static_cast<double>(actor.randomState % 1001u) / 1000.0);
         } else {
+            updateLocomotionWeight(1.0);
             actor.facing = dx < 0.0 ? -1.0 : 1.0;
             actor.x += (dx / distance) * step;
             actor.y += (dy / distance) * step;
+            const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+            const GaitGeometry gaitGeometry = BuildGaitGeometry(
+                planeSide, planeSide * 0.40, planeSide * 0.41);
+            actor.walkPhase = WrapGaitPhase(actor.walkPhase + step / gaitGeometry.cycleTravel);
         }
     }
     const ScenePhase nextPhase = DeterminePhase(elapsedSeconds_);
@@ -1437,11 +1443,11 @@ void IconFightScene::Update(double elapsedSeconds)
 void IconFightScene::ChooseWanderTarget(IconActor& actor)
 {
     const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
-    const double sideMargin = std::max(24.0, planeSide * 1.15);
+    const double sideMargin = std::max(28.0, planeSide * 1.25);
     const double topMargin = std::max(24.0, planeSide * 0.80);
     const double bottomMargin = usingCapturedWorkArea_ ?
-        std::max(32.0, planeSide * 1.35) :
-        std::max(64.0, planeSide * 1.75);
+        std::max(40.0, planeSide * 1.65) :
+        std::max(72.0, planeSide * 1.85);
     const double minX = wanderBounds_.left + sideMargin;
     const double maxX = wanderBounds_.right - sideMargin;
     const double minY = wanderBounds_.top + topMargin;
@@ -1495,12 +1501,30 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
         timings->actorPrepMs = CounterMilliseconds(actorPrepStart, end);
     }
 
+    const double sharedPlaneSide = actors_.empty() ?
+        48.0 :
+        std::max(24.0, std::max(actors_.front().planeWidth, actors_.front().planeHeight));
+    const float sharedLimbWidth = ToFloat(std::clamp(sharedPlaneSide * 0.072, 5.0, 8.5));
+    Gdiplus::Pen sharedBackLimb(Gdiplus::Color(178, 250, 253, 255), sharedLimbWidth);
+    sharedBackLimb.SetStartCap(Gdiplus::LineCapRound);
+    sharedBackLimb.SetEndCap(Gdiplus::LineCapRound);
+    Gdiplus::Pen sharedFrontLimb(Gdiplus::Color(248, 250, 253, 255), sharedLimbWidth);
+    sharedFrontLimb.SetStartCap(Gdiplus::LineCapRound);
+    sharedFrontLimb.SetEndCap(Gdiplus::LineCapRound);
+
     for (size_t index = 0; index < actors_.size(); ++index) {
         const IconActor& actor = actors_[index];
         const ActorPose& pose = poseCache_[index];
         const LONGLONG limbStart = timings != nullptr ? PerformanceCounterNow() : 0;
         DrawActorLimbs(
-            graphics, actor, pose, renderCache_->bodies[index], renderCache_->limbs[index], LimbLayer::Back);
+            graphics,
+            actor,
+            pose,
+            renderCache_->bodies[index],
+            renderCache_->limbs[index],
+            LimbLayer::Back,
+            &sharedBackLimb,
+            sharedLimbWidth);
         if (timings != nullptr) {
             const LONGLONG end = PerformanceCounterNow();
             timings->limbsMs += CounterMilliseconds(limbStart, end);
@@ -1526,7 +1550,14 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
         const ActorPose& pose = poseCache_[index];
         const LONGLONG limbStart = timings != nullptr ? PerformanceCounterNow() : 0;
         DrawActorLimbs(
-            graphics, actor, pose, renderCache_->bodies[index], renderCache_->limbs[index], LimbLayer::Front);
+            graphics,
+            actor,
+            pose,
+            renderCache_->bodies[index],
+            renderCache_->limbs[index],
+            LimbLayer::Front,
+            &sharedFrontLimb,
+            sharedLimbWidth);
         if (timings != nullptr) {
             const LONGLONG end = PerformanceCounterNow();
             timings->limbsMs += CounterMilliseconds(limbStart, end);

@@ -42,6 +42,7 @@ add_library(besktop_runtime STATIC
 add_library(besktop_animation STATIC
     src/besktop/animation/action_clip.cpp
     src/besktop/animation/action_player.cpp
+    src/besktop/animation/gait_ik.cpp
 )
 
 target_compile_features(besktop_animation PUBLIC cxx_std_20)
