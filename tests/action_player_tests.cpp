@@ -207,6 +207,10 @@ besktop::TwoBoneIkSolution SolveSideKickLeg(
     const double depthSign = leadLeg ? 1.0 : -1.0;
     GaitVec3 target = SideKickFootTarget(sample, leadLeg, direction, planeSide);
     GaitVec3 bendHint{heading, 0.0, depthSign * 0.18};
+    const double rootCompensation = std::clamp(
+        sample.footTargetRootCompensationWeight, 0.0, 1.0);
+    target.x -= sample.rootOffsetForward * planeSide * rootCompensation;
+    target.y -= sample.rootOffsetY * planeSide * rootCompensation;
     const double lowerBodyYaw =
         (sample.bodyRotateY * sample.lowerBodyActionRotationWeight) +
         sample.lowerBodyRotateY;
@@ -979,30 +983,62 @@ void TestKickPoseMathematics()
     double maximumProjectedSupportDrift = 0.0;
     for (const ActionId id : kicks) {
         const ActionClip& clip = GetActionClip(id);
+        const double supportReferenceTime =
+            id == ActionId::SpinningBackKick ? clip.prepareEnd * 0.9 : 0.0;
+        const ActionSample supportReference = SampleAction(
+            clip, supportReferenceTime, 1.0);
         const GaitVec3 plantedSupport = SolveSideKickLeg(
-            SampleAction(clip, 0.0, 1.0), false, 1.0, planeSide).end;
+            supportReference,
+            id == ActionId::SpinningBackKick,
+            1.0,
+            planeSide).end;
+        const GaitVec3 plantedSupportInActionSpace = RotateAroundVerticalAxis(
+            plantedSupport,
+            (supportReference.bodyRotateY * supportReference.lowerBodyActionRotationWeight) +
+                supportReference.lowerBodyRotateY);
+        const GaitVec3 plantedSupportWithRoot{
+            plantedSupportInActionSpace.x + supportReference.rootOffsetForward * planeSide,
+            plantedSupportInActionSpace.y + supportReference.rootOffsetY * planeSide,
+            plantedSupportInActionSpace.z,
+        };
         for (const double time : {clip.prepareEnd * 0.9,
                 (clip.activeEnd + clip.contactEnd) * 0.5,
                 (clip.contactEnd + clip.recoverEnd) * 0.5}) {
             const ActionSample sample = SampleAction(clip, time, 1.0);
             const TwoBoneIkSolution kickLeg = SolveSideKickLeg(sample, true, 1.0, planeSide);
-            const TwoBoneIkSolution supportLeg = SolveSideKickLeg(sample, false, 1.0, planeSide);
+            const bool spinningBackKick = id == ActionId::SpinningBackKick;
+            const TwoBoneIkSolution measuredKickLeg = SolveSideKickLeg(
+                sample, !spinningBackKick, 1.0, planeSide);
+            const TwoBoneIkSolution supportLeg = SolveSideKickLeg(
+                sample, spinningBackKick, 1.0, planeSide);
             const double lowerBodyYaw =
                 (sample.bodyRotateY * sample.lowerBodyActionRotationWeight) +
                 sample.lowerBodyRotateY;
             const GaitVec3 supportInActionSpace = RotateAroundVerticalAxis(
                 supportLeg.end, lowerBodyYaw);
+            const GaitVec3 supportWithRoot{
+                supportInActionSpace.x + sample.rootOffsetForward * planeSide,
+                supportInActionSpace.y + sample.rootOffsetY * planeSide,
+                supportInActionSpace.z,
+            };
             maximumSupportDrift = std::max(
-                maximumSupportDrift, Distance(plantedSupport, supportInActionSpace));
+                maximumSupportDrift,
+                Distance(plantedSupportWithRoot, supportWithRoot));
             const GaitVec3 projectedSupport = RotateAroundVerticalAxis(
                 supportLeg.end, sample.lowerBodyRotateY);
+            const GaitVec3 projectedSupportWithRoot{
+                projectedSupport.x + sample.rootOffsetForward * planeSide,
+                projectedSupport.y + sample.rootOffsetY * planeSide,
+                projectedSupport.z,
+            };
             maximumProjectedSupportDrift = std::max(
-                maximumProjectedSupportDrift, Distance(plantedSupport, projectedSupport));
-            Check(std::abs(Distance(kickLeg.root, kickLeg.joint) - thighLength) < 1e-6,
+                maximumProjectedSupportDrift,
+                Distance(plantedSupportWithRoot, projectedSupportWithRoot));
+            Check(std::abs(Distance(measuredKickLeg.root, measuredKickLeg.joint) - thighLength) < 1e-6,
                 "new kick thigh keeps fixed length");
-            Check(std::abs(Distance(kickLeg.joint, kickLeg.end) - shinLength) < 1e-6,
+            Check(std::abs(Distance(measuredKickLeg.joint, measuredKickLeg.end) - shinLength) < 1e-6,
                 "new kick shin keeps fixed length");
-            const double knee = JointInteriorAngleDegrees(kickLeg);
+            const double knee = JointInteriorAngleDegrees(measuredKickLeg);
             Check(knee > 35.0 && knee < 178.0,
                 "new kick knee does not reverse or lock");
         }
@@ -1070,6 +1106,45 @@ void TestKickPoseMathematics()
         "roundhouse combines a high depth arc with a guarded upper body");
 
     const ActionClip& spinClip = GetActionClip(ActionId::SpinningBackKick);
+    const ActionSample spinPrepare = SampleAction(spinClip, 0.30, 1.0);
+    const ActionSample spinContact = SampleAction(spinClip, 0.65, 1.0);
+    const ActionSample spinRecover = SampleAction(spinClip, 0.95, 1.0);
+    const ActionSample spinStep = SampleAction(spinClip, 0.18, 1.0);
+    Check(spinPrepare.bodyRotateY > spinPrepare.lowerBodyRotateY + 20.0 * kPi / 180.0,
+        "spinning back kick shoulders lead the pelvis during prepare");
+    Check(spinContact.bodyRotateY >= 195.0 * kPi / 180.0 &&
+        spinContact.bodyRotateY <= 225.0 * kPi / 180.0 &&
+        spinContact.lowerBodyRotateY >= 180.0 * kPi / 180.0 &&
+        spinContact.lowerBodyRotateY <= 210.0 * kPi / 180.0,
+        "spinning back kick contacts while the actor is back-facing");
+    Check(spinRecover.bodyRotateY > spinContact.bodyRotateY &&
+        spinRecover.bodyRotateY < 350.0 * kPi / 180.0,
+        "spinning back kick continues turning during recover");
+    Check(spinContact.footTargetYawCompensationWeight > 0.99 &&
+        spinContact.footTargetRootCompensationWeight > 0.99 &&
+        spinStep.leadFootForwardOffset >= 0.15 &&
+        spinContact.rearFootForwardOffset >= 1.04 &&
+        spinContact.rearFootLift >= 0.59,
+        "spinning back kick anchors foot targets and keeps a balanced guard");
+    Check(spinContact.rootOffsetForward > 0.16 &&
+        spinClip.finalRootDisplacementForward >= 0.15,
+        "spinning back kick moves the pelvis around the planted lead foot and commits forward travel");
+    const double spinPrepareKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(spinPrepare, false, 1.0, planeSide));
+    const double spinContactKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(spinContact, false, 1.0, planeSide));
+    std::cout << "spinning back kick metrics: prepare/contact knee="
+              << spinPrepareKnee << "/" << spinContactKnee << '\n';
+    Check(spinPrepareKnee >= 55.0 && spinPrepareKnee <= 135.0 &&
+        spinContactKnee >= 150.0 && spinContactKnee <= 176.0,
+        "spinning back kick chambers and extends the left/rear kicking leg");
+    Check(std::abs(spinContact.bodyRotateZ) * 180.0 / kPi >= 70.0 &&
+        spinContact.upperBodyOffsetY >= 0.17,
+        "spinning back kick lowers the upper body dramatically at peak extension");
+    Check(spinStep.leadHandY <= -0.28 &&
+        spinContact.rearHandDepth < 0.0 &&
+        spinContact.leadHandDepth < 0.0,
+        "spinning back kick raises the right hand during the step and swaps arm depth during the turn");
     double maximumSpinYaw = 0.0;
     bool crossedSideOn = false;
     for (int step = 0; step <= 60; ++step) {
@@ -1082,8 +1157,30 @@ void TestKickPoseMathematics()
     }
     Check(crossedSideOn, "spinning back kick yaw crosses near 90 degrees continuously");
     Check(maximumSpinYaw > kPi * 1.9, "spinning back kick completes a full internal turn");
+    Check(std::abs(SampleAction(spinClip, spinClip.recoverEnd, 1.0).bodyRotateY - 2.0 * kPi) < 1e-9,
+        "spinning back kick completes 360 degrees at the end of recover");
     Check(std::abs(SampleAction(spinClip, spinClip.duration, 1.0).bodyRotateY) < 1e-9,
         "spinning back kick returns action yaw to neutral");
+    const ActionSample spinComplete = SampleAction(spinClip, spinClip.duration, 1.0);
+    Check(std::abs(spinComplete.leadFootForwardOffset) < 1e-9 &&
+        std::abs(spinComplete.rearFootForwardOffset) < 1e-9 &&
+        std::abs(spinComplete.rearFootLift) < 1e-9,
+        "spinning back kick restores the original lead/rear stance");
+    const ActionSample spinBeforeComplete = SampleAction(
+        spinClip, spinClip.duration - 1e-6, 1.0);
+    const double committedRoot = spinClip.finalRootDisplacementForward * planeSide;
+    const auto worldFootForwardBeforeCommit = [planeSide](
+            const ActionSample& sample, bool leadFoot) {
+        const double footOffset = leadFoot ?
+            sample.leadFootForwardOffset : sample.rearFootForwardOffset;
+        return sample.rootOffsetForward * planeSide +
+            footOffset * planeSide -
+            sample.rootOffsetForward * planeSide *
+                std::clamp(sample.footTargetRootCompensationWeight, 0.0, 1.0);
+    };
+    Check(std::abs(worldFootForwardBeforeCommit(spinBeforeComplete, true) - committedRoot) < 1e-3 &&
+        std::abs(worldFootForwardBeforeCommit(spinBeforeComplete, false) - committedRoot) < 1e-3,
+        "spinning back kick lands both feet at the committed root before returning to neutral");
 
     std::cout << "kick metrics: front knee=" << frontPrepareKnee << "->" << frontContactKnee
               << "->" << frontRechamberKnee

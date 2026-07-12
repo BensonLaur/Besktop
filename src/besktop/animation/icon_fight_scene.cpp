@@ -838,6 +838,12 @@ JointChain BuildLegChain(
         footTarget.z = LerpValue(footTarget.z, actionTarget.z, weight);
     }
 
+    const double rootCompensation = Clamp01(action.footTargetRootCompensationWeight);
+    if (rootCompensation > 0.001) {
+        footTarget.x -= action.rootOffsetForward * planeSide * rootCompensation;
+        footTarget.y -= action.rootOffsetY * planeSide * rootCompensation;
+    }
+
     const double lowerBodyActionYaw =
         (action.bodyRotateY * action.lowerBodyActionRotationWeight) +
         action.lowerBodyRotateY;
@@ -1505,6 +1511,20 @@ void IconFightScene::Update(double elapsedSeconds)
                 actor.actionSample = actor.actionPlayer.Sample();
                 actor.actionPlayer.ConsumeEvents();
                 if (actor.actionPlayer.IsComplete()) {
+                    const ActorActionState completedState = actor.actionPlayer.State();
+                    const ActionClip& completedClip = GetActionClip(completedState.actionId);
+                    if (completedClip.finalRootDisplacementForward != 0.0) {
+                        const double planeSide = std::max(
+                            24.0, std::max(actor.planeWidth, actor.planeHeight));
+                        const double displacement = completedState.direction *
+                            completedClip.finalRootDisplacementForward * planeSide;
+                        const double margin = planeSide * 0.75;
+                        actor.baseX = std::clamp(
+                            actor.baseX + displacement,
+                            static_cast<double>(wanderBounds_.left) + margin,
+                            static_cast<double>(wanderBounds_.right) - margin);
+                        actor.x = actor.baseX;
+                    }
                     actor.actionPlayer.Stop();
                     actor.actionSample = {};
                     actor.actionPreviewPauseRemaining = 0.55;

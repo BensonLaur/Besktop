@@ -116,6 +116,8 @@ struct ActionSample {
     // Keeps animated foot targets in actor/world action space while the
     // pelvis yaws underneath them; IK absorbs the relative rotation.
     double footTargetYawCompensationWeight = 0.0;
+    // Keeps foot targets planted while action root motion moves the pelvis.
+    double footTargetRootCompensationWeight = 0.0;
     double lowerBodyActionRotationWeight = 0.0;
     double lowerBodyRotateX = 0.0;
     double lowerBodyRotateY = 0.0;
@@ -137,6 +139,9 @@ struct ActionClip {
     ActionHitStrength hitStrength = ActionHitStrength::None;
     ActionDefenseWindow defenseWindow{};
     bool whiffRecovery = false;
+    // Net displacement committed when a completed action hands control back
+    // to locomotion or the diagnostic preview loop.
+    double finalRootDisplacementForward = 0.0;
 };
 
 ActionId ParseActionId(std::wstring_view name);

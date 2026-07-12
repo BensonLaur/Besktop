@@ -72,7 +72,8 @@ constexpr ActionClip kRoundhouseKickClip{
     kRoundhouseKickEvents, std::size(kRoundhouseKickEvents), ActionAttackType::Kick, ActionHitStrength::Heavy};
 constexpr ActionClip kSpinningBackKickClip{
     ActionId::SpinningBackKick, 0.32, 0.62, 0.68, 1.16, 1.38,
-    kSpinningBackKickEvents, std::size(kSpinningBackKickEvents), ActionAttackType::Kick, ActionHitStrength::Heavy};
+    kSpinningBackKickEvents, std::size(kSpinningBackKickEvents), ActionAttackType::Kick, ActionHitStrength::Heavy,
+    {}, false, 0.16};
 constexpr ActionClip kLightHitReactClip{
     ActionId::LightHitReact, 0.08, 0.16, 0.22, 0.46, 0.62};
 constexpr ActionClip kHeavyStaggerClip{
@@ -596,24 +597,74 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         break;
     }
     case ActionId::SpinningBackKick: {
-        const double spin = Segment(time, 0.0, clip.activeEnd);
-        const double chamber = Segment(time, 0.08, clip.prepareEnd) *
-            (1.0 - Segment(time, 0.94, clip.recoverEnd));
+        // The shoulders lead, the pelvis follows, Contact happens while the
+        // actor is still back-facing, and Recover completes the full turn.
+        // Keeping these curves separate prevents the old behavior where the
+        // icon finished 360 degrees before the kick actually contacted.
+        const double bodySpinTurns =
+            0.36 * Segment(time, 0.0, clip.prepareEnd) +
+            0.20 * Segment(time, clip.prepareEnd, clip.activeEnd) +
+            0.04 * Segment(time, clip.activeEnd, clip.contactEnd) +
+            0.40 * Segment(time, clip.contactEnd, clip.recoverEnd);
+        const double pelvisSpinTurns =
+            0.28 * Segment(time, 0.0, clip.prepareEnd) +
+            0.23 * Segment(time, clip.prepareEnd, clip.activeEnd) +
+            0.04 * Segment(time, clip.activeEnd, clip.contactEnd) +
+            0.45 * Segment(time, clip.contactEnd, clip.recoverEnd);
+        const double step = Segment(time, 0.0, 0.18);
+        const double chamber = Segment(time, 0.16, clip.prepareEnd) *
+            (1.0 - Segment(time, 0.88, 1.04));
         const double extension = Segment(time, clip.prepareEnd, clip.activeEnd) *
-            (1.0 - Segment(time, clip.contactEnd, 0.88));
+            (1.0 - Segment(time, clip.contactEnd, 0.84));
+        const double landingStep = Segment(time, 1.04, 1.30);
+        const double balance = std::max(chamber * 0.45, extension);
+        const double rightHandRise = HoldAndReturn(time, 0.0, 0.18, 0.28, 0.48);
+        const double handDepthSwap = HoldAndReturn(time, 0.16, 0.38, 0.80, 1.06);
         EnableFeet(sample);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.bodyRotateY = mirror * 2.0 * kPi * spin;
-        sample.bodyRotateZ = mirror * -7.0 * kPi / 180.0 * std::max(chamber * 0.4, extension);
-        sample.leadFootForwardOffset = 0.08 * chamber + 0.60 * extension;
-        sample.leadFootLift = 0.20 * chamber + 0.27 * extension;
-        sample.leadFootDepthOffset = -0.04 * chamber - 0.10 * extension;
+        sample.bodyRotateY = mirror * 2.0 * kPi * bodySpinTurns;
+        sample.lowerBodyRotateY = mirror * 2.0 * kPi * pelvisSpinTurns;
+        sample.footTargetYawCompensationWeight = 1.0;
+        sample.footTargetRootCompensationWeight = 1.0;
+        // Move the body axis around the planted right/lead foot. The 0.18
+        // term approximates the projected hip radius and makes the support
+        // leg nearly vertical throughout the spin instead of leaning back to
+        // an unmoved root. A full turn finishes 0.16 planeSide forward.
+        sample.rootOffsetForward = 0.16 * step -
+            0.22 * std::sin(std::abs(sample.lowerBodyRotateY));
+        sample.rootOffsetY = 0.14 * balance;
+        sample.bodyRotateX = 0.0;
+        sample.bodyRotateZ = mirror * -72.0 * kPi / 180.0 * extension;
+        sample.upperBodyOffsetForward = 0.12 * extension;
+        sample.upperBodyOffsetY = 0.18 * extension;
+        // Facing right: the right/lead foot steps forward and becomes the
+        // planted pivot. The left/rear leg chambers and performs the kick.
+        sample.leadFootForwardOffset = 0.16 * step;
+        sample.leadFootDepthOffset = 0.02 * step;
+        // After rechambering, bring the kicking foot onto the actor's new
+        // root position before root motion is committed. Without this late
+        // landing step the foot stays planted at the old position and jumps
+        // forward by 0.16 planeSide on the first neutral frame.
+        sample.rearFootForwardOffset =
+            0.10 * chamber + 1.05 * extension + 0.16 * landingStep;
+        sample.rearFootLift = 0.32 * chamber + 0.60 * extension;
+        sample.rearFootDepthOffset = 0.10 * chamber + 0.04 * extension;
         sample.kickStrength = extension;
-        sample.leadHandForward = -0.16;
-        sample.leadHandY = -0.30;
-        sample.rearHandForward = -0.20;
-        sample.rearHandY = -0.16;
+        sample.leadHandForward = 0.20;
+        sample.leadHandY = -0.02 - 0.28 * rightHandRise;
+        sample.leadHandDepth = 0.14 - 0.28 * handDepthSwap;
+        sample.leadArmBendForward = 0.52;
+        sample.rearHandForward = 0.18;
+        sample.rearHandY = -0.01 - 0.08 * handDepthSwap;
+        sample.rearHandDepth = 0.12 - 0.32 * handDepthSwap;
+        sample.rearArmBendForward = 0.62;
+        sample.leadShoulderForwardOffset = 0.03 * balance;
+        sample.leadShoulderYOffset = -0.025 * rightHandRise + 0.03 * extension;
+        sample.leadShoulderDepthOffset = -0.025 * handDepthSwap;
+        sample.rearShoulderForwardOffset = -0.025 * balance;
+        sample.rearShoulderYOffset = -0.025 * extension;
+        sample.rearShoulderDepthOffset = 0.035 * handDepthSwap;
         break;
     }
     case ActionId::LightHitReact: {
