@@ -146,6 +146,10 @@ void TestScenarioResultsAndRootMotionContracts()
     const CombatPairPlan& heavy = GetCombatPairPlan(CombatScenarioId::SideKickHeavyHit);
     Check(parry.expectedResult == CombatResult::Blocked, "lead parry expects blocked");
     Check(slip.expectedResult == CombatResult::Evaded, "lead slip expects evaded");
+    Check(slip.whiffEntryTime >= GetActionClip(ActionId::WhiffRecovery).prepareEnd - 1e-9,
+        "evaded punch enters whiff at overreach instead of replaying prepare");
+    Check(slip.transitionBlendDuration > 0.0 && slip.transitionBlendDuration <= 0.12,
+        "whiff transition uses a short director blend");
     Check(light.expectedResult == CombatResult::HitLight, "uppercut expects light hit");
     Check(heavy.expectedResult == CombatResult::HitHeavy, "side kick expects heavy hit");
     Check(std::abs(GetActionClip(ActionId::HeavyStagger).finalRootDisplacementForward + 0.16) < 1e-9,

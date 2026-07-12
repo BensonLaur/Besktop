@@ -425,6 +425,31 @@ void DrawImpact(Gdiplus::Graphics& graphics, double x, double y, double strength
     graphics.DrawLine(&white, cx + radius * 0.7f, cy - radius * 0.7f, cx - radius * 0.7f, cy + radius * 0.7f);
 }
 
+void DrawParryImpact(Gdiplus::Graphics& graphics, double x, double y, double strength)
+{
+    if (strength <= 0.03) {
+        return;
+    }
+    const unsigned char alpha = static_cast<unsigned char>(
+        std::clamp(strength * 220.0, 0.0, 220.0));
+    Gdiplus::Pen cyan(Gdiplus::Color(alpha, 90, 225, 255), 3.5f);
+    cyan.SetStartCap(Gdiplus::LineCapRound);
+    cyan.SetEndCap(Gdiplus::LineCapRound);
+    Gdiplus::Pen white(Gdiplus::Color(alpha, 245, 255, 255), 2.0f);
+    white.SetStartCap(Gdiplus::LineCapRound);
+    white.SetEndCap(Gdiplus::LineCapRound);
+    const float cx = ToFloat(x);
+    const float cy = ToFloat(y);
+    const float radius = ToFloat(8.0 + 9.0 * strength);
+    graphics.DrawArc(&cyan, cx - radius, cy - radius, radius * 2.0f, radius * 2.0f, 205.0f, 110.0f);
+    graphics.DrawLine(&white, cx - radius * 0.25f, cy - radius * 0.55f,
+        cx + radius * 0.18f, cy - radius * 1.05f);
+    graphics.DrawLine(&white, cx + radius * 0.30f, cy - radius * 0.20f,
+        cx + radius * 0.92f, cy - radius * 0.42f);
+    graphics.DrawLine(&cyan, cx + radius * 0.18f, cy + radius * 0.18f,
+        cx + radius * 0.70f, cy + radius * 0.52f);
+}
+
 void DrawBodyShadow(
     Gdiplus::Graphics& graphics,
     const Gdiplus::PointF* shadowPoints,
@@ -610,6 +635,63 @@ Gdiplus::RectF BoundsForPoints(const Gdiplus::PointF* points, size_t count)
 double LerpValue(double from, double to, double t)
 {
     return from + (to - from) * Clamp01(t);
+}
+
+besktop::ActionSample BlendActionSamples(
+    const besktop::ActionSample& from,
+    const besktop::ActionSample& to,
+    double weight)
+{
+    besktop::ActionSample result;
+#define BESKTOP_BLEND_ACTION_FIELD(field) result.field = LerpValue(from.field, to.field, weight)
+    BESKTOP_BLEND_ACTION_FIELD(bodyRotateX);
+    BESKTOP_BLEND_ACTION_FIELD(bodyRotateY);
+    BESKTOP_BLEND_ACTION_FIELD(bodyRotateZ);
+    BESKTOP_BLEND_ACTION_FIELD(rootOffsetForward);
+    BESKTOP_BLEND_ACTION_FIELD(rootOffsetLateral);
+    BESKTOP_BLEND_ACTION_FIELD(rootOffsetY);
+    BESKTOP_BLEND_ACTION_FIELD(upperBodyOffsetForward);
+    BESKTOP_BLEND_ACTION_FIELD(upperBodyOffsetDepth);
+    BESKTOP_BLEND_ACTION_FIELD(upperBodyOffsetY);
+    BESKTOP_BLEND_ACTION_FIELD(hitStrength);
+    BESKTOP_BLEND_ACTION_FIELD(punchStrength);
+    BESKTOP_BLEND_ACTION_FIELD(kickStrength);
+    BESKTOP_BLEND_ACTION_FIELD(dodgeStrength);
+    BESKTOP_BLEND_ACTION_FIELD(whiffRecoveryStrength);
+    BESKTOP_BLEND_ACTION_FIELD(leadHandForward);
+    BESKTOP_BLEND_ACTION_FIELD(leadHandY);
+    BESKTOP_BLEND_ACTION_FIELD(leadHandDepth);
+    BESKTOP_BLEND_ACTION_FIELD(rearHandForward);
+    BESKTOP_BLEND_ACTION_FIELD(rearHandY);
+    BESKTOP_BLEND_ACTION_FIELD(rearHandDepth);
+    BESKTOP_BLEND_ACTION_FIELD(leadArmBendForward);
+    BESKTOP_BLEND_ACTION_FIELD(rearArmBendForward);
+    BESKTOP_BLEND_ACTION_FIELD(leadShoulderForwardOffset);
+    BESKTOP_BLEND_ACTION_FIELD(leadShoulderYOffset);
+    BESKTOP_BLEND_ACTION_FIELD(leadShoulderDepthOffset);
+    BESKTOP_BLEND_ACTION_FIELD(rearShoulderForwardOffset);
+    BESKTOP_BLEND_ACTION_FIELD(rearShoulderYOffset);
+    BESKTOP_BLEND_ACTION_FIELD(rearShoulderDepthOffset);
+    BESKTOP_BLEND_ACTION_FIELD(handTargetWeight);
+    BESKTOP_BLEND_ACTION_FIELD(leadFootForwardOffset);
+    BESKTOP_BLEND_ACTION_FIELD(leadFootLift);
+    BESKTOP_BLEND_ACTION_FIELD(leadFootDepthOffset);
+    BESKTOP_BLEND_ACTION_FIELD(rearFootForwardOffset);
+    BESKTOP_BLEND_ACTION_FIELD(rearFootLift);
+    BESKTOP_BLEND_ACTION_FIELD(rearFootDepthOffset);
+    BESKTOP_BLEND_ACTION_FIELD(footTargetWeight);
+    BESKTOP_BLEND_ACTION_FIELD(footTargetYawCompensationWeight);
+    BESKTOP_BLEND_ACTION_FIELD(footTargetRootCompensationWeight);
+    BESKTOP_BLEND_ACTION_FIELD(lowerBodyActionRotationWeight);
+    BESKTOP_BLEND_ACTION_FIELD(lowerBodyRotateX);
+    BESKTOP_BLEND_ACTION_FIELD(lowerBodyRotateY);
+    BESKTOP_BLEND_ACTION_FIELD(lowerBodyRotateZ);
+#undef BESKTOP_BLEND_ACTION_FIELD
+    result.leadHandTargetEnabled = from.leadHandTargetEnabled || to.leadHandTargetEnabled;
+    result.rearHandTargetEnabled = from.rearHandTargetEnabled || to.rearHandTargetEnabled;
+    result.leadFootTargetEnabled = from.leadFootTargetEnabled || to.leadFootTargetEnabled;
+    result.rearFootTargetEnabled = from.rearFootTargetEnabled || to.rearFootTargetEnabled;
+    return result;
 }
 
 Vec3 MoveLocalPolar(const Vec3& point, double length, double radians, double depthStep)
@@ -1039,10 +1121,17 @@ void DrawActorLimbs(
         const JointChain& frontArm = limbs.rightArm.frontLayer ? limbs.rightArm : limbs.leftArm;
         const JointChain& frontLeg = limbs.rightLeg.frontLayer ? limbs.rightLeg : limbs.leftLeg;
         const double impactSide = frontArm.end.X >= body.centerX ? 1.0 : -1.0;
-        if (pose.punch > 0.15) {
+        const bool hitImpactAllowed = !actor.combatPreviewActor || actor.combatImpactVisible;
+        if (actor.combatPreviewActor && actor.combatBlockedImpact && pose.punch > 0.15) {
+            DrawParryImpact(
+                graphics,
+                frontArm.end.X + ToFloat(impactSide * 10.0),
+                frontArm.end.Y,
+                pose.punch);
+        } else if (hitImpactAllowed && pose.punch > 0.15) {
             DrawImpact(graphics, frontArm.end.X + ToFloat(impactSide * 16.0), frontArm.end.Y, pose.punch);
         }
-        if (pose.kick > 0.15) {
+        if (hitImpactAllowed && pose.kick > 0.15) {
             DrawImpact(graphics, frontLeg.end.X + ToFloat(impactSide * 18.0), frontLeg.end.Y, pose.kick);
         }
     }
@@ -1742,8 +1831,14 @@ void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDelta
         const double direction = actor.turnMotion.currentFacing == TurnFacing::Left ? -1.0 : 1.0;
         actor.actionPlayer.Start(action, direction);
         actor.actionSample = actor.actionPlayer.Sample();
+        actor.combatBlendElapsed = 0.0;
+        actor.combatBlendDuration = 0.0;
     };
-    if (pairStep.startAttackerAction) startAction(attacker, plan.attackerAction);
+    if (pairStep.startAttackerAction) {
+        attacker.combatImpactVisible = false;
+        attacker.combatBlockedImpact = false;
+        startAction(attacker, plan.attackerAction);
+    }
     if (pairStep.startDefenderAction) startAction(defender, plan.defenderAction);
 
     const auto updateAction = [&](IconActor& actor, bool startedThisStep, double startTime) {
@@ -1753,6 +1848,18 @@ void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDelta
         actor.actionPlayer.Update(advance);
         actor.actionSample = actor.actionPlayer.Sample();
         actor.actionPlayer.ConsumeEvents();
+        if (actor.combatBlendDuration > 0.0) {
+            actor.combatBlendElapsed = std::min(
+                actor.combatBlendDuration,
+                actor.combatBlendElapsed + advance);
+            const double blendWeight = SmoothStep(
+                0.0, actor.combatBlendDuration, actor.combatBlendElapsed);
+            actor.actionSample = BlendActionSamples(
+                actor.combatBlendFrom, actor.actionSample, blendWeight);
+            if (actor.combatBlendElapsed >= actor.combatBlendDuration) {
+                actor.combatBlendDuration = 0.0;
+            }
+        }
     };
     if (combatPairState_.phase == CombatPairPhase::Exchanging ||
         combatPairState_.phase == CombatPairPhase::Recovering) {
@@ -1816,6 +1923,9 @@ void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDelta
                 GetActionClip(plan.defenderAction),
                 plan.expectedContactTime - plan.defenderStartTime);
         const CombatResult actualResult = ResolveCombatContact(probe);
+        attacker.combatImpactVisible = actualResult == CombatResult::HitLight ||
+            actualResult == CombatResult::HitHeavy;
+        attacker.combatBlockedImpact = actualResult == CombatResult::Blocked;
         ApplyCombatResult(combatPairState_, actualResult);
         if (actualResult == CombatResult::HitLight) {
             startAction(defender, ActionId::LightHitReact);
@@ -1824,7 +1934,20 @@ void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDelta
             startAction(defender, ActionId::HeavyStagger);
             combatPairState_.resultActionStarted = true;
         } else if (actualResult == CombatResult::Evaded || actualResult == CombatResult::Whiffed) {
-            attacker.pendingCombatAction = ActionId::WhiffRecovery;
+            // Enter the already-overextended portion of WhiffRecovery directly
+            // from the missed Contact pose. Waiting for the punch to complete
+            // first makes the actor return to guard and visually throw a second
+            // empty punch. The short director blend changes only the transition;
+            // both frozen single-actor clips remain untouched.
+            const ActionSample missedContactPose = attacker.actionSample;
+            startAction(attacker, ActionId::WhiffRecovery);
+            attacker.actionPlayer.Update(plan.whiffEntryTime);
+            attacker.actionPlayer.ConsumeEvents();
+            attacker.combatBlendFrom = missedContactPose;
+            attacker.combatBlendElapsed = 0.0;
+            attacker.combatBlendDuration = plan.transitionBlendDuration;
+            attacker.actionSample = missedContactPose;
+            combatPairState_.resultActionStarted = true;
         }
         const double attackToAxis = DistancePointToSegment(
             probe.attackPoint, probe.targetAxisTop, probe.targetAxisBottom);

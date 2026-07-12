@@ -31,6 +31,8 @@ besktop::CombatPairPlan MakePlan(
         targetHeightScale,
         0.30,
         0.30,
+        0.18,
+        0.10,
     };
 }
 

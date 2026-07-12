@@ -112,9 +112,14 @@ public:
         bool turnPreviewActor = false;
         double turnPreviewPauseRemaining = 0.65;
         bool combatPreviewActor = false;
+        bool combatImpactVisible = false;
+        bool combatBlockedImpact = false;
         ActionPlayer actionPlayer;
         ActionSample actionSample{};
         ActionId pendingCombatAction = ActionId::None;
+        ActionSample combatBlendFrom{};
+        double combatBlendElapsed = 0.0;
+        double combatBlendDuration = 0.0;
     };
 
 private:

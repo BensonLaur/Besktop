@@ -48,6 +48,8 @@ struct CombatPairPlan {
     double targetHeightScale = 0.0;
     double settlingDuration = 0.30;
     double recoveryDuration = 0.30;
+    double whiffEntryTime = 0.18;
+    double transitionBlendDuration = 0.10;
 };
 
 struct CombatPairReadiness {
