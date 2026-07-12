@@ -1409,13 +1409,48 @@ void TestDefenseAndFeedbackMathematics()
 
     const ActionClip& lightClip = GetActionClip(ActionId::LightHitReact);
     const ActionClip& heavyClip = GetActionClip(ActionId::HeavyStagger);
-    const ActionSample light = SampleAction(lightClip, 0.18, 1.0);
+    const ActionSample light = SampleAction(lightClip, 0.14, 1.0);
+    const ActionSample lightLeft = SampleAction(lightClip, 0.14, -1.0);
     const ActionSample heavy = SampleAction(heavyClip, 0.34, 1.0);
     Check(heavyClip.duration > lightClip.duration + 0.40,
         "heavy stagger lasts clearly longer than light hit react");
     Check(std::abs(heavy.rootOffsetForward) > std::abs(light.rootOffsetForward) + 0.10 &&
         std::abs(heavy.bodyRotateZ) > std::abs(light.bodyRotateZ) + 0.10,
         "heavy stagger has more displacement and rotation than light reaction");
+    Check(std::abs(light.bodyRotateZ) >= 17.5 * kPi / 180.0 &&
+        std::abs(light.bodyRotateY) >= 15.5 * kPi / 180.0 &&
+        light.rootOffsetForward <= -0.079 && light.rootOffsetForward >= -0.081,
+        "light hit react creates a readable short recoil without heavy displacement");
+    Check(light.leadShoulderForwardOffset <= -0.059 &&
+        light.leadShoulderYOffset >= 0.034 &&
+        light.rearShoulderYOffset < 0.0 &&
+        light.leadHandDepth > light.rearHandDepth + 0.20,
+        "light hit react jolts one shoulder and arm away while the rear hand braces");
+    Check(light.leadFootTargetEnabled && light.rearFootTargetEnabled &&
+        light.footTargetRootCompensationWeight > 0.99 &&
+        light.rootOffsetY >= 0.044,
+        "light hit react plants both feet while the knees absorb the impact");
+    Check(std::abs(light.bodyRotateZ + lightLeft.bodyRotateZ) < 1e-9 &&
+        std::abs(light.bodyRotateY + lightLeft.bodyRotateY) < 1e-9 &&
+        std::abs(light.rootOffsetForward - lightLeft.rootOffsetForward) < 1e-9,
+        "light hit react mirrors recoil rotation while preserving displacement magnitude");
+    const TwoBoneIkSolution lightLeadLeg = SolveSideKickLeg(light, true, 1.0, planeSide);
+    const TwoBoneIkSolution lightRearLeg = SolveSideKickLeg(light, false, 1.0, planeSide);
+    const double lightLeadKnee = JointInteriorAngleDegrees(lightLeadLeg);
+    const double lightRearKnee = JointInteriorAngleDegrees(lightRearLeg);
+    Check(lightLeadKnee >= 135.0 && lightLeadKnee <= 165.0 &&
+        lightRearKnee >= 135.0 && lightRearKnee <= 165.0 &&
+        std::abs(lightLeadKnee - lightRearKnee) < 10.0,
+        "light hit react uses a shallow symmetric knee give");
+    const ActionSample lightLate = SampleAction(lightClip, lightClip.duration - 1e-6, 1.0);
+    Check(std::abs(lightLate.bodyRotateZ) < 1e-6 &&
+        std::abs(lightLate.rootOffsetForward) < 1e-6 &&
+        std::abs(lightLate.rootOffsetY) < 1e-6,
+        "light hit react blends continuously back to neutral before completion");
+    std::cout << "light hit metrics: recoil z/yaw="
+              << std::abs(light.bodyRotateZ) * 180.0 / kPi << "/"
+              << std::abs(light.bodyRotateY) * 180.0 / kPi
+              << ", knee=" << lightLeadKnee << "/" << lightRearKnee << '\n';
 
     const ActionClip& whiffClip = GetActionClip(ActionId::WhiffRecovery);
     const ActionClip& leadClip = GetActionClip(ActionId::LeadStraight);

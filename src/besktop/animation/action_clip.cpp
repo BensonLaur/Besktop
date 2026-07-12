@@ -668,20 +668,44 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         break;
     }
     case ActionId::LightHitReact: {
-        const double snap = HoldAndReturn(time, 0.0, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
-        const double follow = std::sin(Segment(time, 0.0, clip.contactEnd) * kPi) * actionWeight;
+        // A light hit should read as a sharp involuntary recoil, not as an
+        // intentional layback. The shoulder line snaps first, the planted
+        // knees absorb a much smaller downward impulse, then a restrained
+        // counter-sway settles the actor back into guard.
+        const double snap = HoldAndReturn(time, 0.0, 0.10, clip.contactEnd, 0.44);
+        const double armJolt = HoldAndReturn(time, 0.02, 0.11, 0.20, 0.40);
+        const double kneeGive = HoldAndReturn(time, 0.03, 0.14, 0.26, clip.recoverEnd);
+        const double settle = HoldAndReturn(time, 0.24, 0.34, 0.42, 0.54);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.bodyRotateZ = mirror * -13.0 * kPi / 180.0 * snap;
-        sample.bodyRotateY = mirror * -11.0 * kPi / 180.0 * snap;
-        sample.rootOffsetForward = -0.065 * snap;
-        sample.rootOffsetY = 0.018 * snap;
+        EnableFeet(sample);
+        sample.footTargetRootCompensationWeight = 1.0;
+        sample.bodyRotateX = 5.0 * kPi / 180.0 * snap;
+        sample.bodyRotateZ = mirror * ((-18.0 * snap) + (3.0 * settle)) * kPi / 180.0;
+        sample.bodyRotateY = mirror * ((-16.0 * snap) + (2.0 * settle)) * kPi / 180.0;
+        sample.rootOffsetForward = -0.08 * snap;
+        sample.rootOffsetY = 0.045 * kneeGive;
+        sample.upperBodyOffsetForward = -0.055 * snap;
+        sample.upperBodyOffsetY = 0.025 * snap;
         sample.hitStrength = snap;
-        sample.lowerBodyActionRotationWeight = 0.15;
-        sample.leadHandForward -= 0.10 * follow;
-        sample.leadHandY += 0.08 * follow;
-        sample.rearHandForward -= 0.08 * follow;
-        sample.rearHandY += 0.05 * follow;
+        sample.lowerBodyActionRotationWeight = 0.08;
+        // The near hand is knocked away and down for a frame while the rear
+        // hand braces in front of the body. Their unequal targets keep the
+        // silhouette distinct from an attacking punch or symmetric guard.
+        sample.leadHandForward = 0.13 - 0.10 * armJolt;
+        sample.leadHandY = -0.10 + 0.11 * armJolt;
+        sample.leadHandDepth = 0.22 + 0.14 * armJolt;
+        sample.leadArmBendForward = 0.48;
+        sample.rearHandForward = 0.18 - 0.03 * armJolt;
+        sample.rearHandY = -0.02 + 0.025 * armJolt;
+        sample.rearHandDepth = 0.11;
+        sample.rearArmBendForward = 0.64;
+        sample.leadShoulderForwardOffset = -0.06 * snap;
+        sample.leadShoulderYOffset = 0.035 * snap;
+        sample.leadShoulderDepthOffset = 0.035 * snap;
+        sample.rearShoulderForwardOffset = -0.018 * snap;
+        sample.rearShoulderYOffset = -0.012 * snap;
+        sample.rearShoulderDepthOffset = -0.018 * snap;
         break;
     }
     case ActionId::HeavyStagger: {
