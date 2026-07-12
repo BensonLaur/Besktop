@@ -43,6 +43,7 @@ add_library(besktop_animation STATIC
     src/besktop/animation/action_clip.cpp
     src/besktop/animation/action_player.cpp
     src/besktop/animation/combat_pair.cpp
+    src/besktop/animation/combat_director.cpp
     src/besktop/animation/gait_ik.cpp
     src/besktop/animation/turn_motion.cpp
 )
@@ -100,6 +101,11 @@ add_executable(besktop_combat_tests
 )
 target_link_libraries(besktop_combat_tests PRIVATE besktop_animation)
 
+add_executable(besktop_combat_director_tests
+    tests/combat_director_tests.cpp
+)
+target_link_libraries(besktop_combat_director_tests PRIVATE besktop_animation)
+
 add_executable(besktop_runtime_options_tests
     tests/runtime_options_tests.cpp
     src/besktop/app/runtime_options.cpp
@@ -109,6 +115,7 @@ target_link_libraries(besktop_runtime_options_tests PRIVATE besktop_animation)
 enable_testing()
 add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 add_test(NAME besktop_combat_tests COMMAND besktop_combat_tests)
+add_test(NAME besktop_combat_director_tests COMMAND besktop_combat_director_tests)
 add_test(NAME besktop_runtime_options_tests COMMAND besktop_runtime_options_tests)
 
 foreach(target_name IN ITEMS besktop besktop_mvp_cli)
@@ -132,6 +139,8 @@ if(MSVC)
     set_property(TARGET besktop_action_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_combat_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_combat_director_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_runtime_options_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

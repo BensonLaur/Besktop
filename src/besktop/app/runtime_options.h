@@ -20,10 +20,12 @@ struct RuntimeOptions {
     bool invalidActionPreview = false;
     CombatScenarioId combatPreview = CombatScenarioId::None;
     bool invalidCombatPreview = false;
+    bool combatDirectorPreviewEnabled = false;
     bool actionOrbitCameraEnabled = false;
     bool turnPreviewEnabled = false;
 };
 
+RuntimeOptions LoadRuntimeOptions();
 const RuntimeOptions& GetRuntimeOptions();
 
 } // namespace besktop

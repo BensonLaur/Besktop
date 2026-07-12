@@ -102,6 +102,8 @@ RuntimeOptions LoadRuntimeOptions()
     options.combatPreview = ParseCombatScenarioId(combatPreviewName);
     options.invalidCombatPreview = !combatPreviewName.empty() &&
         options.combatPreview == CombatScenarioId::None;
+    options.combatDirectorPreviewEnabled =
+        ReadTruthyEnvironmentFlag(L"BESKTOP_COMBAT_DIRECTOR_PREVIEW");
     const std::wstring actionPreviewName = ReadEnvironmentString(L"BESKTOP_ACTION_PREVIEW");
     options.actionPreview = ParseActionId(actionPreviewName);
     options.invalidActionPreview = !actionPreviewName.empty() && options.actionPreview == ActionId::None;

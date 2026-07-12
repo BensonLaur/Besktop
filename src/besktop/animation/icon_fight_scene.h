@@ -10,6 +10,7 @@
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/animation/action_player.h"
 #include "besktop/animation/combat_pair.h"
+#include "besktop/animation/combat_director.h"
 #include "besktop/animation/turn_motion.h"
 #include "besktop/render/icon_image_cache.h"
 
@@ -127,7 +128,20 @@ private:
     ScenePhase DeterminePhase(double elapsedSeconds) const;
     void LogPhase(ScenePhase phase);
     void ChooseWanderTarget(IconActor& actor);
-    void UpdateCombatPreview(double deltaSeconds, double actionDeltaSeconds);
+    void UpdateCombatPairActors(
+        std::size_t attackerIndex,
+        std::size_t defenderIndex,
+        CombatScenarioId scenario,
+        bool directorInteraction,
+        double deltaSeconds,
+        double actionDeltaSeconds);
+    void UpdateCombatDirector(double deltaSeconds, double actionDeltaSeconds);
+    void ConfigureCombatStations(
+        std::size_t attackerIndex,
+        std::size_t defenderIndex,
+        CombatScenarioId scenario,
+        double centerX,
+        double centerY);
 
     std::vector<IconActor> actors_;
     mutable std::vector<ActorPose> poseCache_;
@@ -143,9 +157,13 @@ private:
     ActionId previewAction_ = ActionId::None;
     CombatScenarioId combatPreview_ = CombatScenarioId::None;
     CombatPairState combatPairState_{};
+    CombatDirectorState combatDirectorState_{};
+    std::vector<CombatDirectorCandidate> combatDirectorCandidates_;
+    bool combatDirectorEnabled_ = false;
     double combatStationLeftX_ = 0.0;
     double combatStationRightX_ = 0.0;
     double combatStationY_ = 0.0;
+    bool combatDirectorSeparatingConfigured_ = false;
     CombatPairPhase loggedCombatPhase_ = CombatPairPhase::Inactive;
     bool actionOrbitCameraEnabled_ = false;
     bool turnPreviewEnabled_ = false;

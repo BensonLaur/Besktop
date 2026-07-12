@@ -7,7 +7,7 @@
 > 我的电脑“中毒”了：桌面图标开始打架。
 > 不是病毒，不删文件，只是一个让桌面图标开打的 Windows 桌面整活工具。
 
-Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一个安全的全屏舞台，让全部桌面图标像小角色一样错峰醒来、长出白色手脚并自由闲逛。第一轮单演员基础动作库已经完成；诊断模式还可以让前两个演员运行固定攻防场景，自动战斗仍将在后续版本加入。
+Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一个安全的全屏舞台，让全部桌面图标像小角色一样错峰醒来、长出白色手脚并自由闲逛。第一轮单演员基础动作库已经完成；诊断模式可以运行固定双演员场景，也可以让导演偶尔选择一对漫游演员完成一次攻防后继续闲逛。普通 Release 默认仍不自动战斗。
 
 ## 运行效果
 
@@ -95,7 +95,7 @@ Icon Fight 的目标不是做复杂游戏，而是做一个“看一眼就想转
 - 感染演出模式实施计划。
 - 最小玩法包加载 MVP。
 
-当前已用固定双演员诊断预览接通靠近、对齐、共享时间线、真实 Contact 几何与结果反馈；下一步才是轻量 `CombatDirector`，不会直接开启全量群架。
+当前已用固定双演员诊断预览接通靠近、对齐、共享时间线、真实 Contact 几何与结果反馈；轻量 `CombatDirector` 也已在诊断开关下接入全量漫游场景，但同时最多只控制一对演员，不会开启全量群架。
 
 ## 技术方向
 
@@ -124,6 +124,7 @@ $env:BESKTOP_ACTION_PREVIEW='lead_straight' # 首演员原地循环预览动作
 $env:BESKTOP_ACTION_ORBIT_CAMERA='1' # 摄像头绕动作预览演员的身体中轴连续观察
 $env:BESKTOP_TURN_PREVIEW='1'       # 首演员原地循环预览连续 3D 转身
 $env:BESKTOP_COMBAT_PREVIEW='lead_parry' # 前两个演员运行固定攻防场景
+$env:BESKTOP_COMBAT_DIRECTOR_PREVIEW='1' # 漫游中偶尔选择一对演员互动一次
 ```
 
 第一轮单演员动作库支持以下预览 ID：
@@ -137,7 +138,9 @@ light_hit_react  heavy_stagger  whiff_recovery
 
 单动作预览会等待首个演员完成觉醒和四肢生长，再暂停该演员的随机漫游并循环播放；推荐配合 `BESKTOP_MAX_ACTORS=1` 和 `BESKTOP_ANIMATION_SPEED=0.5` 观察。`BESKTOP_TURN_PREVIEW=1` 使用同一诊断约定循环展示左右连续转身。
 
-固定双演员预览支持 `lead_parry`、`lead_slip`、`uppercut_light_hit`、`side_kick_heavy_hit`。推荐设置 `BESKTOP_MAX_ACTORS=2`；双方觉醒后会平滑走到工作区中央附近、连续转身面对彼此、稳定站立，再按共享时间线完成交互并平滑回到站位循环。Contact 使用实际拳端或脚端和防守者身体轴胶囊判定；防守窗口不会绕过几何条件。预览优先级依次为 Combat、Turn、Action、默认漫游。未设置预览时，全量觉醒与自由漫游行为不变；当前仍没有生命值、胜负、全量自动配对或自动战斗。
+固定双演员预览支持 `lead_parry`、`lead_slip`、`uppercut_light_hit`、`side_kick_heavy_hit`。推荐设置 `BESKTOP_MAX_ACTORS=2`；双方觉醒后会平滑走到工作区中央附近、连续转身面对彼此、稳定站立，再按共享时间线完成交互并平滑回到站位循环。Contact 使用实际拳端或脚端和防守者身体轴胶囊判定；防守窗口不会绕过几何条件。预览优先级依次为固定 Combat、CombatDirector、Turn、Action、默认漫游。未设置预览时，全量觉醒与自由漫游行为不变；当前仍没有生命值、胜负、全量自动配对或自动战斗。
+
+`BESKTOP_COMBAT_DIRECTOR_PREVIEW=1` 用于全量漫游中的受控互动预览。Director 只选择已经觉醒、未转身且没有执行动作的附近演员，在工作区内预约一块安全区域，并稳定轮换四个固定场景；一轮结束后双方先分开，再设置演员冷却和全局冷却并恢复普通漫游。其他演员不会消失，选择新目标时会尽量避开预约区域。同一时间最多一对演员互动；当前没有生命值、伤害数值、淘汰、连招、多人围攻或阵营关系。
 
 动作预览时可再设置 `BESKTOP_ACTION_ORBIT_CAMERA=1`：诊断摄像头会围绕角色身体中轴连续环绕，8 个动画秒完成一圈，用于从正面、侧面和背面检查薄片、挂点与固定骨长四肢。该观察变换不改变动作数据、逻辑朝向或漫游转身状态；在 `0.5x` 动画速度下，一圈约需 16 秒。
 
@@ -145,8 +148,7 @@ light_hit_react  heavy_stagger  whiff_recovery
 
 ```powershell
 $env:BESKTOP_ENABLE_DIAGNOSTICS='1'
-$env:BESKTOP_COMBAT_PREVIEW='lead_parry'
-$env:BESKTOP_MAX_ACTORS='2'
+$env:BESKTOP_COMBAT_DIRECTOR_PREVIEW='1'
 ```
 
 Debug 或已启用诊断的 Release 会记录详细 Info 日志；普通 Release 默认只记录 Warning/Error，且不会仅因正常启动创建日志。这些开关只用于调试，不改变真实桌面，不属于用户可见玩法设置。
