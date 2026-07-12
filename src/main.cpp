@@ -101,6 +101,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     if (options.invalidActionPreview) {
         besktop::LogWarning(L"invalid BESKTOP_ACTION_PREVIEW value; action preview disabled");
     }
+    if (options.invalidCombatPreview) {
+        besktop::LogWarning(L"invalid BESKTOP_COMBAT_PREVIEW value; combat preview disabled");
+    }
     ConfigureDpiAwareness();
     return besktop::RunStageWindow(instance, showCommand, options);
 }

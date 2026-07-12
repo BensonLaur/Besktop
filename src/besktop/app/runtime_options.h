@@ -1,6 +1,7 @@
 #pragma once
 
 #include "besktop/animation/action_clip.h"
+#include "besktop/animation/combat_pair.h"
 
 namespace besktop {
 
@@ -17,6 +18,8 @@ struct RuntimeOptions {
     double animationOffsetSeconds = 0.0;
     ActionId actionPreview = ActionId::None;
     bool invalidActionPreview = false;
+    CombatScenarioId combatPreview = CombatScenarioId::None;
+    bool invalidCombatPreview = false;
     bool actionOrbitCameraEnabled = false;
     bool turnPreviewEnabled = false;
 };

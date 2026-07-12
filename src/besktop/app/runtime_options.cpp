@@ -98,6 +98,10 @@ RuntimeOptions LoadRuntimeOptions()
     options.maxActors = ReadEnvironmentUnsigned(L"BESKTOP_MAX_ACTORS", 0, 10000);
     options.animationSpeed = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_SPEED", 1.0, 0.05, 8.0);
     options.animationOffsetSeconds = ReadEnvironmentDouble(L"BESKTOP_ANIMATION_OFFSET", 0.0, 0.0, 3600.0);
+    const std::wstring combatPreviewName = ReadEnvironmentString(L"BESKTOP_COMBAT_PREVIEW");
+    options.combatPreview = ParseCombatScenarioId(combatPreviewName);
+    options.invalidCombatPreview = !combatPreviewName.empty() &&
+        options.combatPreview == CombatScenarioId::None;
     const std::wstring actionPreviewName = ReadEnvironmentString(L"BESKTOP_ACTION_PREVIEW");
     options.actionPreview = ParseActionId(actionPreviewName);
     options.invalidActionPreview = !actionPreviewName.empty() && options.actionPreview == ActionId::None;

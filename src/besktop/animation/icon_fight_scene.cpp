@@ -1265,9 +1265,14 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     elapsedSeconds_ = 0.0;
     previousElapsedSeconds_ = 0.0;
     phase_ = ScenePhase::Sleeping;
-    previewAction_ = GetRuntimeOptions().actionPreview;
+    combatPreview_ = GetRuntimeOptions().combatPreview;
+    combatPairState_ = {};
+    loggedCombatPhase_ = CombatPairPhase::Inactive;
+    previewAction_ = combatPreview_ == CombatScenarioId::None ?
+        GetRuntimeOptions().actionPreview : ActionId::None;
     actionOrbitCameraEnabled_ = GetRuntimeOptions().actionOrbitCameraEnabled;
-    turnPreviewEnabled_ = GetRuntimeOptions().turnPreviewEnabled;
+    turnPreviewEnabled_ = combatPreview_ == CombatScenarioId::None &&
+        GetRuntimeOptions().turnPreviewEnabled;
 
     const unsigned char colors[][3] = {
         {44, 135, 255},
@@ -1371,7 +1376,8 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.blue = colors[index % std::size(colors)][2];
         actor.iconImage = iconImageCache_.Load(icon.image, actor.label);
         actor.usedIconImageFallback = actor.iconImage == nullptr;
-        actor.turnPreviewActor = index == 0 && turnPreviewEnabled_;
+        actor.combatPreviewActor = index < 2 && combatPreview_ != CombatScenarioId::None;
+        actor.turnPreviewActor = index == 0 && turnPreviewEnabled_ && !actor.combatPreviewActor;
         actor.actionPreviewActor = index == 0 && previewAction_ != ActionId::None && !actor.turnPreviewActor;
         actor.actionOrbitCameraEnabled = actor.actionPreviewActor && actionOrbitCameraEnabled_;
         actors_.push_back(actor);
@@ -1379,6 +1385,22 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
 
     for (IconActor& actor : actors_) {
         ChooseWanderTarget(actor);
+    }
+    if (combatPreview_ != CombatScenarioId::None && actors_.size() >= 2) {
+        const CombatPairPlan& plan = GetCombatPairPlan(combatPreview_);
+        const double largestPlaneSide = std::max(
+            std::max(actors_[0].planeWidth, actors_[0].planeHeight),
+            std::max(actors_[1].planeWidth, actors_[1].planeHeight));
+        const double axisDistance = std::max(48.0, largestPlaneSide) * plan.desiredAxisDistanceScale;
+        const double centerX = (wanderBounds_.left + wanderBounds_.right) * 0.5;
+        combatStationLeftX_ = centerX - axisDistance * 0.5;
+        combatStationRightX_ = centerX + axisDistance * 0.5;
+        const double topMargin = largestPlaneSide * 1.1;
+        const double bottomMargin = largestPlaneSide * 1.8;
+        combatStationY_ = std::clamp(
+            (wanderBounds_.top + wanderBounds_.bottom) * 0.46,
+            static_cast<double>(wanderBounds_.top) + topMargin,
+            static_cast<double>(wanderBounds_.bottom) - bottomMargin);
     }
     poseCache_.resize(actors_.size());
     renderCache_->bodies.resize(actors_.size());
@@ -1403,6 +1425,16 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     }
     if (turnPreviewEnabled_ && !actors_.empty()) {
         LogInfo(L"turn preview enabled");
+    }
+    if (combatPreview_ != CombatScenarioId::None) {
+        if (actors_.size() < 2) {
+            LogWarning(L"combat preview requires at least two valid actors; preview disabled");
+            combatPreview_ = CombatScenarioId::None;
+            combatPairState_ = {};
+            for (IconActor& actor : actors_) actor.combatPreviewActor = false;
+        } else {
+            LogInfo(L"combat preview enabled: " + std::wstring(CombatScenarioIdName(combatPreview_)));
+        }
     }
     size_t boundActorCount = 0;
     size_t labelBoundsActorCount = 0;
@@ -1477,12 +1509,18 @@ void IconFightScene::Update(double elapsedSeconds)
     const double actionDeltaSeconds = std::clamp(unboundedDeltaSeconds, 0.0, 1.0);
     previousElapsedSeconds_ = elapsedSeconds;
     elapsedSeconds_ = elapsedSeconds;
+    if (combatPreview_ != CombatScenarioId::None && actors_.size() >= 2) {
+        UpdateCombatPreview(deltaSeconds, actionDeltaSeconds);
+    }
     for (IconActor& actor : actors_) {
         const auto updateLocomotionWeight = [&actor, deltaSeconds](double targetWeight) {
             actor.locomotionWeight = BlendTurnLocomotion(
                 actor.locomotionWeight, targetWeight, deltaSeconds);
         };
         const double actorTime = elapsedSeconds_ - kAwakeningStartSeconds - actor.awakeningDelay;
+        if (actor.combatPreviewActor) {
+            continue;
+        }
         if (actorTime < kAwakeningDurationSeconds + kLimbGrowthDurationSeconds) {
             actor.x = actor.baseX;
             actor.y = actor.baseY;
@@ -1601,6 +1639,102 @@ void IconFightScene::Update(double elapsedSeconds)
     if (nextPhase != phase_) {
         phase_ = nextPhase;
         LogPhase(phase_);
+    }
+}
+
+void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDeltaSeconds)
+{
+    IconActor& attacker = actors_[0];
+    IconActor& defender = actors_[1];
+    const CombatPairPlan& plan = GetCombatPairPlan(combatPreview_);
+    const auto isAwake = [this](const IconActor& actor) {
+        const double actorTime = elapsedSeconds_ - kAwakeningStartSeconds - actor.awakeningDelay;
+        return actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
+    };
+    const bool bothAwake = isAwake(attacker) && isAwake(defender);
+    if (!bothAwake) {
+        for (IconActor* actor : {&attacker, &defender}) {
+            actor->x = actor->baseX;
+            actor->y = actor->baseY;
+            actor->locomotionWeight = 0.0;
+            actor->actionSample = {};
+        }
+    }
+
+    const auto distanceToStation = [](const IconActor& actor, double stationX, double stationY) {
+        return std::hypot(stationX - actor.x, stationY - actor.y);
+    };
+    const bool atStations = distanceToStation(attacker, combatStationLeftX_, combatStationY_) <= 1.5 &&
+        distanceToStation(defender, combatStationRightX_, combatStationY_) <= 1.5;
+    const bool aligned = atStations &&
+        !attacker.turnMotion.turning && !defender.turnMotion.turning &&
+        attacker.turnMotion.currentFacing == TurnFacing::Right &&
+        defender.turnMotion.currentFacing == TurnFacing::Left;
+    CombatPairReadiness readiness;
+    readiness.bothAwake = bothAwake;
+    readiness.atStations = atStations;
+    readiness.aligned = aligned;
+    const CombatPairStep pairStep = UpdateCombatPair(
+        combatPairState_, plan, readiness, actionDeltaSeconds);
+    (void)pairStep;
+
+    const auto blendLocomotion = [deltaSeconds](IconActor& actor, double target) {
+        actor.locomotionWeight = BlendTurnLocomotion(actor.locomotionWeight, target, deltaSeconds);
+    };
+    const auto advanceGait = [](IconActor& actor, double distance) {
+        const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+        const GaitGeometry geometry = BuildGaitGeometry(planeSide, planeSide * 0.40, planeSide * 0.41);
+        actor.walkPhase = WrapGaitPhase(actor.walkPhase + distance / geometry.cycleTravel);
+    };
+    const auto moveTo = [&](IconActor& actor, double targetX, double targetY) {
+        const double dx = targetX - actor.x;
+        const double dy = targetY - actor.y;
+        const double distance = std::hypot(dx, dy);
+        if (distance <= 1.5) {
+            actor.x = targetX;
+            actor.y = targetY;
+            blendLocomotion(actor, 0.0);
+            return;
+        }
+        const TurnFacing desiredFacing = FacingFromDirection(dx);
+        if (actor.turnMotion.turning) {
+            blendLocomotion(actor, 0.0);
+            if (actor.locomotionWeight <= 0.02) UpdateTurnMotion(actor.turnMotion, actionDeltaSeconds);
+            return;
+        }
+        if (RequestTurn(actor.turnMotion, desiredFacing)) {
+            blendLocomotion(actor, 0.0);
+            return;
+        }
+        blendLocomotion(actor, 1.0);
+        const double step = std::min(distance, actor.walkSpeed * deltaSeconds);
+        actor.x += dx / distance * step;
+        actor.y += dy / distance * step;
+        advanceGait(actor, step);
+    };
+
+    if (combatPairState_.phase == CombatPairPhase::Approaching) {
+        moveTo(attacker, combatStationLeftX_, combatStationY_);
+        moveTo(defender, combatStationRightX_, combatStationY_);
+    } else if (combatPairState_.phase == CombatPairPhase::Aligning) {
+        blendLocomotion(attacker, 0.0);
+        blendLocomotion(defender, 0.0);
+        if (attacker.locomotionWeight <= 0.02) {
+            if (!attacker.turnMotion.turning) RequestTurn(attacker.turnMotion, TurnFacing::Right);
+            UpdateTurnMotion(attacker.turnMotion, actionDeltaSeconds);
+        }
+        if (defender.locomotionWeight <= 0.02) {
+            if (!defender.turnMotion.turning) RequestTurn(defender.turnMotion, TurnFacing::Left);
+            UpdateTurnMotion(defender.turnMotion, actionDeltaSeconds);
+        }
+    } else {
+        blendLocomotion(attacker, 0.0);
+        blendLocomotion(defender, 0.0);
+    }
+
+    if (combatPairState_.phase != loggedCombatPhase_) {
+        loggedCombatPhase_ = combatPairState_.phase;
+        LogInfo(L"combat pair phase: " + std::wstring(CombatPairPhaseName(loggedCombatPhase_)));
     }
 }
 
