@@ -77,7 +77,9 @@ constexpr ActionClip kSpinningBackKickClip{
 constexpr ActionClip kLightHitReactClip{
     ActionId::LightHitReact, 0.08, 0.16, 0.22, 0.46, 0.62};
 constexpr ActionClip kHeavyStaggerClip{
-    ActionId::HeavyStagger, 0.16, 0.30, 0.38, 0.82, 1.12};
+    ActionId::HeavyStagger, 0.16, 0.30, 0.38, 0.82, 1.12,
+    nullptr, 0, ActionAttackType::None, ActionHitStrength::None,
+    {}, false, -0.16};
 constexpr ActionClip kWhiffRecoveryClip{
     ActionId::WhiffRecovery, 0.18, 0.30, 0.36, 0.78, 0.96,
     nullptr, 0, ActionAttackType::None, ActionHitStrength::None, {}, true};
@@ -709,16 +711,54 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         break;
     }
     case ActionId::HeavyStagger: {
-        const double impact = HoldAndReturn(time, 0.0, clip.activeEnd, 0.58, clip.recoverEnd);
-        const double retreat = HoldAndReturn(time, clip.prepareEnd, clip.contactEnd, 0.70, clip.recoverEnd);
+        const double impact = HoldAndReturn(time, 0.0, 0.16, 0.46, 0.88);
+        const double armFlail = HoldAndReturn(time, 0.03, 0.18, 0.40, 0.76);
+        const double legLoad = HoldAndReturn(time, 0.04, 0.18, 0.62, 0.96);
+        const double retreat = Segment(time, 0.05, 0.34);
+        const double settleForward = Segment(time, 0.70, 1.02);
+        const double rearCatch = Segment(time, 0.08, 0.34);
+        const double rearCatchLift = HoldAndReturn(time, 0.08, 0.18, 0.25, 0.40);
+        const double leadGather = Segment(time, 0.38, 0.78);
+        const double leadGatherLift = HoldAndReturn(time, 0.38, 0.52, 0.62, 0.80);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.bodyRotateZ = mirror * -27.0 * kPi / 180.0 * impact;
-        sample.bodyRotateX = -9.0 * kPi / 180.0 * impact;
-        sample.rootOffsetForward = -0.25 * retreat;
-        sample.rootOffsetY = 0.045 * impact;
+        EnableFeet(sample);
+        sample.footTargetYawCompensationWeight = 1.0;
+        sample.footTargetRootCompensationWeight = 1.0;
+        sample.bodyRotateZ = mirror * -30.0 * kPi / 180.0 * impact;
+        sample.bodyRotateY = mirror * -18.0 * kPi / 180.0 * impact;
+        sample.bodyRotateX = -11.0 * kPi / 180.0 * impact;
+        sample.rootOffsetForward = -0.24 * retreat + 0.08 * settleForward;
+        sample.rootOffsetY = 0.075 * legLoad;
+        sample.upperBodyOffsetForward = -0.08 * impact;
+        sample.upperBodyOffsetY = 0.045 * impact;
         sample.hitStrength = impact;
-        sample.lowerBodyActionRotationWeight = 0.10;
+        sample.lowerBodyActionRotationWeight = 0.16;
+        // The rear foot catches the displaced center of mass first; the lead
+        // foot then gathers underneath the body. Both finish at the clip's
+        // committed -0.16 root displacement so the return to neutral cannot
+        // teleport either foot.
+        sample.rearFootForwardOffset = -0.19 * rearCatch + 0.03 * settleForward;
+        sample.rearFootLift = 0.10 * rearCatchLift;
+        sample.rearFootDepthOffset = -0.05 * rearCatch * (1.0 - settleForward);
+        sample.leadFootForwardOffset = -0.16 * leadGather;
+        sample.leadFootLift = 0.065 * leadGatherLift;
+        // Break the guard asymmetrically: the near arm is thrown outward and
+        // down while the far hand trails behind the shoulder before recovery.
+        sample.leadHandForward = 0.04 - 0.12 * armFlail;
+        sample.leadHandY = 0.02 + 0.16 * armFlail;
+        sample.leadHandDepth = 0.34 + 0.16 * armFlail;
+        sample.leadArmBendForward = 0.35;
+        sample.rearHandForward = -0.02 - 0.08 * armFlail;
+        sample.rearHandY = 0.04 + 0.10 * armFlail;
+        sample.rearHandDepth = 0.02;
+        sample.rearArmBendForward = 0.42;
+        sample.leadShoulderForwardOffset = -0.10 * impact;
+        sample.leadShoulderYOffset = 0.055 * impact;
+        sample.leadShoulderDepthOffset = 0.055 * impact;
+        sample.rearShoulderForwardOffset = -0.045 * impact;
+        sample.rearShoulderYOffset = 0.018 * impact;
+        sample.rearShoulderDepthOffset = -0.035 * impact;
         break;
     }
     case ActionId::WhiffRecovery: {

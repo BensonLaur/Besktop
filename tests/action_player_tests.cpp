@@ -1452,6 +1452,44 @@ void TestDefenseAndFeedbackMathematics()
               << std::abs(light.bodyRotateY) * 180.0 / kPi
               << ", knee=" << lightLeadKnee << "/" << lightRearKnee << '\n';
 
+    const ActionSample heavyImpact = SampleAction(heavyClip, 0.34, 1.0);
+    const ActionSample heavyGather = SampleAction(heavyClip, 0.78, 1.0);
+    const ActionSample heavyBeforeComplete = SampleAction(
+        heavyClip, heavyClip.duration - 1e-6, 1.0);
+    Check(std::abs(heavyImpact.bodyRotateZ) >= 29.5 * kPi / 180.0 &&
+        std::abs(heavyImpact.bodyRotateY) >= 17.5 * kPi / 180.0 &&
+        heavyImpact.rootOffsetForward <= -0.23,
+        "heavy stagger creates a strong displaced upper-body silhouette");
+    Check(heavyImpact.rearFootForwardOffset < -0.18 &&
+        heavyGather.leadFootForwardOffset < -0.14 &&
+        heavyImpact.rearFootTargetEnabled && heavyImpact.leadFootTargetEnabled,
+        "heavy stagger catches with the rear foot before gathering the lead foot");
+    Check(heavyImpact.leadHandDepth > heavyImpact.rearHandDepth + 0.40 &&
+        heavyImpact.leadShoulderForwardOffset <= -0.095 &&
+        heavyImpact.rearShoulderForwardOffset <= -0.04,
+        "heavy stagger breaks the guard and drives both shoulders backward asymmetrically");
+    Check(heavyClip.finalRootDisplacementForward <= -0.15 &&
+        std::abs(heavyBeforeComplete.rootOffsetForward -
+            heavyClip.finalRootDisplacementForward) < 1e-5 &&
+        std::abs(heavyBeforeComplete.leadFootForwardOffset -
+            heavyClip.finalRootDisplacementForward) < 1e-5 &&
+        std::abs(heavyBeforeComplete.rearFootForwardOffset -
+            heavyClip.finalRootDisplacementForward) < 1e-5,
+        "heavy stagger aligns root and both feet before committing the retreat position");
+    for (const double sampleTime : {0.18, 0.30, 0.52, 0.78, 1.02}) {
+        const ActionSample sample = SampleAction(heavyClip, sampleTime, 1.0);
+        for (const bool leadLeg : {false, true}) {
+            const TwoBoneIkSolution leg = SolveSideKickLeg(sample, leadLeg, 1.0, planeSide);
+            Check(std::abs(Distance(leg.root, leg.joint) - planeSide * 0.40) < 1e-6 &&
+                std::abs(Distance(leg.joint, leg.end) - planeSide * 0.41) < 1e-6,
+                "heavy stagger keeps both leg segment lengths fixed");
+        }
+    }
+    std::cout << "heavy stagger metrics: peak/root/final="
+              << std::abs(heavyImpact.bodyRotateZ) * 180.0 / kPi << "/"
+              << heavyImpact.rootOffsetForward << "/"
+              << heavyClip.finalRootDisplacementForward << '\n';
+
     const ActionClip& whiffClip = GetActionClip(ActionId::WhiffRecovery);
     const ActionClip& leadClip = GetActionClip(ActionId::LeadStraight);
     Check((whiffClip.recoverEnd - whiffClip.contactEnd) >
