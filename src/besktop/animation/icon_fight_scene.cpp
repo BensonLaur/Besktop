@@ -1674,9 +1674,14 @@ void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDelta
     readiness.bothAwake = bothAwake;
     readiness.atStations = atStations;
     readiness.aligned = aligned;
+    readiness.actionsComplete = combatPairState_.result != CombatResult::None &&
+        attacker.actionPlayer.State().actionId == ActionId::None &&
+        defender.actionPlayer.State().actionId == ActionId::None &&
+        attacker.pendingCombatAction == ActionId::None &&
+        defender.pendingCombatAction == ActionId::None;
+    readiness.returnedToStations = atStations;
     const CombatPairStep pairStep = UpdateCombatPair(
         combatPairState_, plan, readiness, actionDeltaSeconds);
-    (void)pairStep;
 
     const auto blendLocomotion = [deltaSeconds](IconActor& actor, double target) {
         actor.locomotionWeight = BlendTurnLocomotion(actor.locomotionWeight, target, deltaSeconds);
@@ -1713,7 +1718,8 @@ void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDelta
         advanceGait(actor, step);
     };
 
-    if (combatPairState_.phase == CombatPairPhase::Approaching) {
+    if (combatPairState_.phase == CombatPairPhase::Approaching ||
+        combatPairState_.phase == CombatPairPhase::Returning) {
         moveTo(attacker, combatStationLeftX_, combatStationY_);
         moveTo(defender, combatStationRightX_, combatStationY_);
     } else if (combatPairState_.phase == CombatPairPhase::Aligning) {
@@ -1731,6 +1737,136 @@ void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDelta
         blendLocomotion(attacker, 0.0);
         blendLocomotion(defender, 0.0);
     }
+
+    const auto startAction = [](IconActor& actor, ActionId action) {
+        const double direction = actor.turnMotion.currentFacing == TurnFacing::Left ? -1.0 : 1.0;
+        actor.actionPlayer.Start(action, direction);
+        actor.actionSample = actor.actionPlayer.Sample();
+    };
+    if (pairStep.startAttackerAction) startAction(attacker, plan.attackerAction);
+    if (pairStep.startDefenderAction) startAction(defender, plan.defenderAction);
+
+    const auto updateAction = [&](IconActor& actor, bool startedThisStep, double startTime) {
+        if (actor.actionPlayer.State().actionId == ActionId::None) return;
+        const double advance = startedThisStep ?
+            std::max(0.0, combatPairState_.interactionTime - startTime) : actionDeltaSeconds;
+        actor.actionPlayer.Update(advance);
+        actor.actionSample = actor.actionPlayer.Sample();
+        actor.actionPlayer.ConsumeEvents();
+    };
+    if (combatPairState_.phase == CombatPairPhase::Exchanging ||
+        combatPairState_.phase == CombatPairPhase::Recovering) {
+        updateAction(attacker, pairStep.startAttackerAction, plan.attackerStartTime);
+        updateAction(defender, pairStep.startDefenderAction, plan.defenderStartTime);
+    }
+
+    if (pairStep.resolveContact) {
+        const double attackerDirection = attacker.turnMotion.currentFacing == TurnFacing::Left ? -1.0 : 1.0;
+        const double defenderDirection = defender.turnMotion.currentFacing == TurnFacing::Left ? -1.0 : 1.0;
+        IconActor contactAttacker = attacker;
+        IconActor contactDefender = defender;
+        contactAttacker.actionSample = SampleAction(
+            GetActionClip(plan.attackerAction),
+            plan.expectedContactTime - plan.attackerStartTime,
+            attackerDirection);
+        if (plan.defenderAction != ActionId::None) {
+            contactDefender.actionSample = SampleAction(
+                GetActionClip(plan.defenderAction),
+                plan.expectedContactTime - plan.defenderStartTime,
+                defenderDirection);
+        }
+        const ActorPose attackerPose = BuildPose(contactAttacker, elapsedSeconds_);
+        const ActorPose defenderPose = BuildPose(contactDefender, elapsedSeconds_);
+        const LimbPose attackerLimbs = BuildLimbPose(contactAttacker, attackerPose);
+        const LimbPose defenderLimbs = BuildLimbPose(contactDefender, defenderPose);
+        const bool attackerRightLead = attackerPose.facing > 0.0;
+        const JointChain& attackChain = GetActionClip(plan.attackerAction).attackType == ActionAttackType::Kick ?
+            (attackerRightLead ? attackerLimbs.rightLeg : attackerLimbs.leftLeg) :
+            (attackerRightLead ? attackerLimbs.rightArm : attackerLimbs.leftArm);
+        const CombatPoint shoulderCenter{
+            (defenderLimbs.leftArm.root.X + defenderLimbs.rightArm.root.X) * 0.5,
+            (defenderLimbs.leftArm.root.Y + defenderLimbs.rightArm.root.Y) * 0.5,
+        };
+        const CombatPoint hipCenter{
+            (defenderLimbs.leftLeg.root.X + defenderLimbs.rightLeg.root.X) * 0.5,
+            (defenderLimbs.leftLeg.root.Y + defenderLimbs.rightLeg.root.Y) * 0.5,
+        };
+        const double planeSide = std::max({
+            24.0,
+            attacker.planeWidth,
+            attacker.planeHeight,
+            defender.planeWidth,
+            defender.planeHeight,
+        });
+        CombatContactProbe probe;
+        probe.attackPoint = {attackChain.end.X, attackChain.end.Y};
+        probe.attackRadius = planeSide * 0.13;
+        probe.attackType = GetActionClip(plan.attackerAction).attackType == ActionAttackType::Kick ?
+            CombatAttackType::Kick : CombatAttackType::Punch;
+        probe.hitStrength = GetActionClip(plan.attackerAction).hitStrength;
+        probe.attackDirection = {attackerDirection, 0.0};
+        probe.targetAxisTop = shoulderCenter;
+        probe.targetAxisBottom = hipCenter;
+        probe.targetRadius = planeSide * 0.48;
+        probe.actorAxisDistance = std::abs(defender.x - attacker.x);
+        probe.maximumAxisDistance = planeSide * (plan.desiredAxisDistanceScale + 0.18);
+        probe.defenseWindow = plan.defenderAction == ActionId::None ?
+            ActionDefenseWindowType::None :
+            ActionDefenseWindowAt(
+                GetActionClip(plan.defenderAction),
+                plan.expectedContactTime - plan.defenderStartTime);
+        const CombatResult actualResult = ResolveCombatContact(probe);
+        ApplyCombatResult(combatPairState_, actualResult);
+        if (actualResult == CombatResult::HitLight) {
+            startAction(defender, ActionId::LightHitReact);
+            combatPairState_.resultActionStarted = true;
+        } else if (actualResult == CombatResult::HitHeavy) {
+            startAction(defender, ActionId::HeavyStagger);
+            combatPairState_.resultActionStarted = true;
+        } else if (actualResult == CombatResult::Evaded || actualResult == CombatResult::Whiffed) {
+            attacker.pendingCombatAction = ActionId::WhiffRecovery;
+        }
+        const double attackToAxis = DistancePointToSegment(
+            probe.attackPoint, probe.targetAxisTop, probe.targetAxisBottom);
+        LogInfo(
+            L"combat contact: expected=" + std::wstring(CombatResultName(plan.expectedResult)) +
+            L", actual=" + std::wstring(CombatResultName(actualResult)) +
+            L", axisDistance=" + std::to_wstring(probe.actorAxisDistance) +
+            L", attackPoint=" + std::to_wstring(probe.attackPoint.x) + L"," +
+            std::to_wstring(probe.attackPoint.y) +
+            L", targetRadius=" + std::to_wstring(probe.targetRadius) +
+            L", attackToAxis=" + std::to_wstring(attackToAxis) +
+            L", defense=" + std::to_wstring(static_cast<int>(probe.defenseWindow)) +
+            L", consumed=yes");
+        if (actualResult != plan.expectedResult) {
+            LogWarning(L"combat preview result differs from scenario expectation");
+        }
+    }
+
+    const auto finishAction = [&](IconActor& actor) {
+        if (actor.actionPlayer.State().actionId == ActionId::None || !actor.actionPlayer.IsComplete()) return;
+        const ActorActionState completed = actor.actionPlayer.State();
+        const ActionClip& clip = GetActionClip(completed.actionId);
+        if (clip.finalRootDisplacementForward != 0.0) {
+            const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+            const double margin = planeSide * 1.25;
+            actor.x = std::clamp(
+                actor.x + completed.direction * clip.finalRootDisplacementForward * planeSide,
+                static_cast<double>(wanderBounds_.left) + margin,
+                static_cast<double>(wanderBounds_.right) - margin);
+            actor.baseX = actor.x;
+        }
+        actor.actionPlayer.Stop();
+        actor.actionSample = {};
+        if (actor.pendingCombatAction != ActionId::None) {
+            const ActionId pending = actor.pendingCombatAction;
+            actor.pendingCombatAction = ActionId::None;
+            startAction(actor, pending);
+            combatPairState_.resultActionStarted = true;
+        }
+    };
+    finishAction(attacker);
+    finishAction(defender);
 
     if (combatPairState_.phase != loggedCombatPhase_) {
         loggedCombatPhase_ = combatPairState_.phase;

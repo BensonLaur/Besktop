@@ -114,6 +114,7 @@ public:
         bool combatPreviewActor = false;
         ActionPlayer actionPlayer;
         ActionSample actionSample{};
+        ActionId pendingCombatAction = ActionId::None;
     };
 
 private:

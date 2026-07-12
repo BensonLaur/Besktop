@@ -85,7 +85,7 @@ const besktop::CombatPairPlan& SideKickHeavyHitPlan()
         besktop::ActionId::None,
         0.0,
         besktop::CombatResult::HitHeavy,
-        1.52,
+        1.35,
         0.04);
     return plan;
 }
