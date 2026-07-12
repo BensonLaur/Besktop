@@ -512,14 +512,34 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
             (roundhouse ? 0.31 : (sideKick ? 0.315 : 0.27)) * extension;
         sample.leadFootDepthOffset = (roundhouse ? 0.10 : (sideKick ? 0.03 : 0.0)) * chamber +
             (roundhouse ? 0.42 : (sideKick ? 0.02 : 0.0)) * extension;
-        sample.bodyRotateY = mirror * (roundhouse ? 24.0 : (sideKick ? 10.0 : 4.0)) * kPi / 180.0 * balance;
-        sample.bodyRotateZ = mirror * (roundhouse ? -11.0 : (sideKick ? -8.0 : -5.0)) * kPi / 180.0 * balance;
+        sample.bodyRotateY = mirror * (roundhouse ? 24.0 : (sideKick ? 10.0 : 6.0)) * kPi / 180.0 * balance;
+        sample.bodyRotateZ = mirror * (roundhouse ? -11.0 : (sideKick ? -8.0 : -11.0)) * kPi / 180.0 * balance;
         sample.lowerBodyRotateY = mirror * (roundhouse ? 18.0 : 0.0) * kPi / 180.0 * balance;
         sample.kickStrength = extension;
-        sample.leadHandForward = -0.10 - 0.08 * balance;
-        sample.leadHandY = -0.33 + 0.05 * balance;
-        sample.rearHandForward = -0.18 + 0.05 * balance;
-        sample.rearHandY = -0.17 - 0.04 * balance;
+        if (!sideKick && !roundhouse) {
+            // A front kick keeps both hands in front while the icon torso
+            // counters the extending leg. The stronger lean is intentional:
+            // a card-backed actor needs a readable silhouette, not the subtle
+            // balance adjustment of a realistic human rig.
+            sample.bodyRotateX = 3.0 * kPi / 180.0 * balance;
+            sample.leadHandForward = 0.20;
+            sample.leadHandY = -0.02;
+            sample.leadHandDepth = 0.13;
+            sample.leadArmBendForward = 0.62;
+            sample.rearHandForward = 0.18;
+            sample.rearHandY = -0.01;
+            sample.rearHandDepth = 0.12;
+            sample.rearArmBendForward = 0.62;
+            sample.leadShoulderForwardOffset = -0.02 * balance;
+            sample.leadShoulderYOffset = 0.012 * balance;
+            sample.rearShoulderForwardOffset = 0.025 * balance;
+            sample.rearShoulderYOffset = -0.015 * balance;
+        } else {
+            sample.leadHandForward = -0.10 - 0.08 * balance;
+            sample.leadHandY = -0.33 + 0.05 * balance;
+            sample.rearHandForward = -0.18 + 0.05 * balance;
+            sample.rearHandY = -0.17 - 0.04 * balance;
+        }
         break;
     }
     case ActionId::SpinningBackKick: {

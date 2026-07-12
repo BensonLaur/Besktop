@@ -963,14 +963,29 @@ void TestKickPoseMathematics()
 
     const ActionSample frontPrepare = SampleAction(GetActionClip(ActionId::FrontKick), 0.18, 1.0);
     const ActionSample frontContact = SampleAction(GetActionClip(ActionId::FrontKick), 0.38, 1.0);
+    const ActionSample frontRechamber = SampleAction(GetActionClip(ActionId::FrontKick), 0.50, 1.0);
     const double frontPrepareKnee = JointInteriorAngleDegrees(
         SolveSideKickLeg(frontPrepare, true, 1.0, planeSide));
     const double frontContactKnee = JointInteriorAngleDegrees(
         SolveSideKickLeg(frontContact, true, 1.0, planeSide));
+    const double frontRechamberKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(frontRechamber, true, 1.0, planeSide));
     Check(frontPrepareKnee >= 80.0 && frontPrepareKnee <= 145.0,
         "front kick chambers before extension");
     Check(frontContactKnee >= 155.0 && frontContactKnee <= 176.0,
         "front kick extends without locking");
+    Check(frontRechamberKnee >= 80.0 && frontRechamberKnee <= 145.0,
+        "front kick folds back into a chamber before landing");
+    Check(std::abs(frontContact.bodyRotateZ) * 180.0 / kPi >= 10.5 &&
+        frontContact.leadHandForward >= 0.19 &&
+        frontContact.rearHandForward >= 0.17 &&
+        frontContact.leadArmBendForward > 0.60 &&
+        frontContact.rearArmBendForward > 0.60,
+        "front kick combines a readable counter-lean with two guarded hands");
+    Check(std::abs(frontContact.rootOffsetForward) < 1e-9 &&
+        std::abs(frontContact.rootOffsetLateral) < 1e-9 &&
+        std::abs(frontContact.rootOffsetY) < 1e-9,
+        "front kick does not slide the planted actor root");
 
     const ActionSample sideContact = SampleAction(GetActionClip(ActionId::SideKick), 0.38, 1.0);
     const ActionSample roundContact = SampleAction(GetActionClip(ActionId::RoundhouseKick), 0.46, 1.0);
@@ -997,6 +1012,7 @@ void TestKickPoseMathematics()
         "spinning back kick returns action yaw to neutral");
 
     std::cout << "kick metrics: front knee=" << frontPrepareKnee << "->" << frontContactKnee
+              << "->" << frontRechamberKnee
               << ", depth front/side/round=" << frontContact.leadFootDepthOffset << "/"
               << sideContact.leadFootDepthOffset << "/" << roundContact.leadFootDepthOffset
               << ", support drift=" << maximumSupportDrift
