@@ -432,11 +432,31 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
     case ActionId::SlipRight: {
         const double side = clip.id == ActionId::SlipLeft ? -1.0 : 1.0;
         const double slip = HoldAndReturn(time, 0.0, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
+        const bool slippingSideIsLead = side * mirror > 0.0;
+        EnableFeet(sample);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.rootOffsetLateral = side * 0.13 * slip;
-        sample.bodyRotateZ = side * 11.0 * kPi / 180.0 * slip;
-        sample.bodyRotateY = mirror * side * 5.0 * kPi / 180.0 * slip;
+        // Reuse the verified layback crouch path: lower the actor root and
+        // raise each planted foot target by nearly the same amount. The
+        // slipping-side target rises slightly farther, producing a deeper
+        // fixed-length IK bend without introducing a second leg solver.
+        sample.rootOffsetY = 0.05 * slip;
+        sample.leadFootLift = (slippingSideIsLead ? 0.065 : 0.05) * slip;
+        sample.rearFootLift = (slippingSideIsLead ? 0.05 : 0.065) * slip;
+        // Side slips bend around the actor's forward axis. This is distinct
+        // from layback's screen-space Z lean and reads correctly under the
+        // 360-degree diagnostic camera.
+        sample.bodyRotateX = -side * 45.0 * kPi / 180.0 * slip;
+        sample.bodyRotateY = mirror * side * 7.0 * kPi / 180.0 * slip;
+        sample.lowerBodyActionRotationWeight = 0.03;
+        sample.leadHandForward = 0.18;
+        sample.leadHandY = -0.01;
+        sample.leadHandDepth = 0.12;
+        sample.leadArmBendForward = 0.62;
+        sample.rearHandForward = 0.18;
+        sample.rearHandY = -0.01;
+        sample.rearHandDepth = 0.12;
+        sample.rearArmBendForward = 0.62;
         sample.dodgeStrength = slip;
         break;
     }

@@ -1147,6 +1147,39 @@ void TestDefenseAndFeedbackMathematics()
     Check(std::abs(slipLeft.rootOffsetForward) < 1e-9 &&
         std::abs(slipRight.rootOffsetForward) < 1e-9,
         "slips avoid forward root motion");
+    Check(slipLeft.leadFootTargetEnabled && slipLeft.rearFootTargetEnabled &&
+        slipLeft.rootOffsetY >= 0.049 &&
+        std::abs(slipLeft.leadFootLift - slipLeft.rootOffsetY) < 1e-9 &&
+        slipLeft.rearFootLift > slipLeft.leadFootLift + 0.01,
+        "left slip reuses the planted crouch path and bends the left/rear leg farther");
+    Check(slipRight.leadFootLift > slipRight.rearFootLift + 0.01 &&
+        std::abs(slipRight.rearFootLift - slipRight.rootOffsetY) < 1e-9,
+        "right slip mirrors the deeper leg target");
+    Check(std::abs(std::abs(slipLeft.bodyRotateX) * 180.0 / kPi - 45.0) < 0.1 &&
+        std::abs(slipLeft.bodyRotateZ) < 1e-9,
+        "slips use a forty-five-degree side bend distinct from layback");
+    const auto slipKneeAngle = [&](const ActionSample& sample, bool leadLeg) {
+        const double depthSign = leadLeg ? 1.0 : -1.0;
+        const double legSide = leadLeg ? 1.0 : -1.0;
+        const GaitVec3 hip{0.0, hipY, depthSign * planeSide * 0.22};
+        const double lift = leadLeg ? sample.leadFootLift : sample.rearFootLift;
+        const GaitVec3 foot{
+            legSide * laybackGeometry.stride * 0.10,
+            hipY + laybackGeometry.legDrop - lift * planeSide,
+            hip.z + depthSign * laybackGeometry.footDepth,
+        };
+        return JointInteriorAngleDegrees(SolveTwoBoneIk(
+            hip,
+            foot,
+            planeSide * 0.40,
+            planeSide * 0.41,
+            GaitVec3{1.0, 0.0, depthSign * 0.18}));
+    };
+    const double slipLeftSupportKnee = slipKneeAngle(slipLeft, true);
+    const double slipLeftDeepKnee = slipKneeAngle(slipLeft, false);
+    Check(slipLeftDeepKnee < slipLeftSupportKnee - 4.0 &&
+        slipLeftDeepKnee < 145.0 && slipLeftSupportKnee < 155.0,
+        "left slip produces a deeper left knee and a smaller right knee bend");
 
     const ActionSample parry = SampleAction(GetActionClip(ActionId::Parry), 0.25, 1.0);
     Check(parry.leadHandTargetEnabled && parry.leadHandDepth > 0.35 &&
@@ -1177,7 +1210,9 @@ void TestDefenseAndFeedbackMathematics()
               << ", guard lead/rear=" << laybackLeadGuardAngle << "/"
               << laybackRearGuardAngle
               << ", knee=" << minimumLaybackKnee << ".." << maximumLaybackKnee
-              << ", max foot drift=" << maximumLaybackFootDrift << '\n';
+              << ", max foot drift=" << maximumLaybackFootDrift
+              << ", slip knee deep/support=" << slipLeftDeepKnee << "/"
+              << slipLeftSupportKnee << '\n';
 }
 
 void TestMirroringKeepsTimeline()
