@@ -510,7 +510,7 @@ Vec3 ProjectedUpperBodyOffset(const ActorPose& pose, double planeSide)
     // intended screen-space lateral translation.
     return besktop::RotateAroundVerticalAxis(
         Vec3{
-            0.0,
+            pose.action.upperBodyOffsetForward * planeSide,
             pose.action.upperBodyOffsetY * planeSide,
             pose.action.upperBodyOffsetDepth * planeSide,
         },
@@ -836,6 +836,23 @@ JointChain BuildLegChain(
         footTarget.x = LerpValue(footTarget.x, actionTarget.x, weight);
         footTarget.y = LerpValue(footTarget.y, actionTarget.y, weight);
         footTarget.z = LerpValue(footTarget.z, actionTarget.z, weight);
+    }
+
+    const double lowerBodyActionYaw =
+        (action.bodyRotateY * action.lowerBodyActionRotationWeight) +
+        action.lowerBodyRotateY;
+    const double yawCompensation = Clamp01(action.footTargetYawCompensationWeight);
+    if (yawCompensation > 0.001 && std::abs(lowerBodyActionYaw) > 0.001) {
+        const Vec3 compensatedTarget = besktop::RotateAroundVerticalAxis(
+            footTarget, -lowerBodyActionYaw);
+        footTarget.x = LerpValue(footTarget.x, compensatedTarget.x, yawCompensation);
+        footTarget.y = LerpValue(footTarget.y, compensatedTarget.y, yawCompensation);
+        footTarget.z = LerpValue(footTarget.z, compensatedTarget.z, yawCompensation);
+        const Vec3 compensatedBendHint = besktop::RotateAroundVerticalAxis(
+            bendHint, -lowerBodyActionYaw);
+        bendHint.x = LerpValue(bendHint.x, compensatedBendHint.x, yawCompensation);
+        bendHint.y = LerpValue(bendHint.y, compensatedBendHint.y, yawCompensation);
+        bendHint.z = LerpValue(bendHint.z, compensatedBendHint.z, yawCompensation);
     }
 
     const LocalJointChain local = BuildTwoBoneIkChain(

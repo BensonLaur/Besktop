@@ -503,18 +503,24 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         const double extension = Segment(time, clip.prepareEnd, clip.activeEnd) *
             (1.0 - Segment(time, clip.contactEnd, recoverChamberEnd));
         const double balance = std::max(chamber * 0.55, extension);
+        const double sideTurn = sideKick ?
+            Segment(time, 0.0, clip.prepareEnd * 0.82) *
+                (1.0 - Segment(time, recoverChamberEnd, clip.recoverEnd)) :
+            0.0;
         EnableFeet(sample);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
         sample.leadFootForwardOffset = (roundhouse ? 0.08 : 0.11) * chamber +
-            (roundhouse ? 0.43 : (sideKick ? 0.565 : 0.59)) * extension;
-        sample.leadFootLift = (roundhouse ? 0.25 : 0.20) * chamber +
-            (roundhouse ? 0.31 : (sideKick ? 0.315 : 0.27)) * extension;
+            (roundhouse ? 0.43 : (sideKick ? 0.70 : 0.59)) * extension;
+        sample.leadFootLift = (roundhouse ? 0.25 : (sideKick ? 0.28 : 0.20)) * chamber +
+            (roundhouse ? 0.31 : (sideKick ? 0.50 : 0.27)) * extension;
         sample.leadFootDepthOffset = (roundhouse ? 0.10 : (sideKick ? 0.03 : 0.0)) * chamber +
             (roundhouse ? 0.42 : (sideKick ? 0.02 : 0.0)) * extension;
-        sample.bodyRotateY = mirror * (roundhouse ? 24.0 : (sideKick ? 10.0 : 6.0)) * kPi / 180.0 * balance;
-        sample.bodyRotateZ = mirror * (roundhouse ? -11.0 : (sideKick ? -8.0 : -11.0)) * kPi / 180.0 * balance;
-        sample.lowerBodyRotateY = mirror * (roundhouse ? 18.0 : 0.0) * kPi / 180.0 * balance;
+        sample.bodyRotateY = mirror * (roundhouse ? 24.0 * balance :
+            (sideKick ? 78.0 * sideTurn : 6.0 * balance)) * kPi / 180.0;
+        sample.bodyRotateZ = mirror * (roundhouse ? -11.0 : (sideKick ? -19.0 : -11.0)) * kPi / 180.0 * balance;
+        sample.lowerBodyRotateY = mirror * (roundhouse ? 18.0 * balance :
+            (sideKick ? 78.0 * sideTurn : 0.0)) * kPi / 180.0;
         sample.kickStrength = extension;
         if (!sideKick && !roundhouse) {
             // A front kick keeps both hands in front while the icon torso
@@ -534,6 +540,32 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
             sample.leadShoulderYOffset = 0.012 * balance;
             sample.rearShoulderForwardOffset = 0.025 * balance;
             sample.rearShoulderYOffset = -0.015 * balance;
+        } else if (sideKick) {
+            // Turn the card-backed torso clearly side-on and counterbalance
+            // the higher horizontal leg with a guarded shoulder line. This
+            // must read differently from front_kick even without a human hip
+            // silhouette.
+            sample.bodyRotateX = 0.0;
+            sample.footTargetYawCompensationWeight = 1.0;
+            sample.upperBodyOffsetForward = -0.10 * balance;
+            sample.upperBodyOffsetY = 0.18 * balance;
+            sample.leadHandForward = 0.18;
+            sample.leadHandY = -0.02;
+            sample.leadHandDepth = 0.14;
+            sample.leadArmBendForward = 0.60;
+            sample.rearHandForward = 0.16;
+            sample.rearHandY = -0.01;
+            sample.rearHandDepth = 0.12;
+            sample.rearArmBendForward = 0.62;
+            // For the right/lead-leg preview, the kicking-side shoulder rises
+            // above the opposite shoulder as the torso leans away. Mirroring
+            // keeps the same anatomical relationship for the other facing.
+            sample.leadShoulderForwardOffset = -0.02 * balance;
+            sample.leadShoulderYOffset = -0.05 * balance;
+            sample.leadShoulderDepthOffset = -0.015 * balance;
+            sample.rearShoulderForwardOffset = 0.02 * balance;
+            sample.rearShoulderYOffset = 0.035 * balance;
+            sample.rearShoulderDepthOffset = 0.02 * balance;
         } else {
             sample.leadHandForward = -0.10 - 0.08 * balance;
             sample.leadHandY = -0.33 + 0.05 * balance;

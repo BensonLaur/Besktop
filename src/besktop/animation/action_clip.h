@@ -79,6 +79,7 @@ struct ActionSample {
     double rootOffsetY = 0.0;
     // Upper-body-only translation. It is applied after body/arm projection so
     // the planted pelvis, leg IK and foot targets cannot be affected.
+    double upperBodyOffsetForward = 0.0;
     double upperBodyOffsetDepth = 0.0;
     double upperBodyOffsetY = 0.0;
     double hitStrength = 0.0;
@@ -112,6 +113,9 @@ struct ActionSample {
     double rearFootLift = 0.0;
     double rearFootDepthOffset = 0.0;
     double footTargetWeight = 0.0;
+    // Keeps animated foot targets in actor/world action space while the
+    // pelvis yaws underneath them; IK absorbs the relative rotation.
+    double footTargetYawCompensationWeight = 0.0;
     double lowerBodyActionRotationWeight = 0.0;
     double lowerBodyRotateX = 0.0;
     double lowerBodyRotateY = 0.0;

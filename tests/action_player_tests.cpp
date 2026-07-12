@@ -205,12 +205,33 @@ besktop::TwoBoneIkSolution SolveSideKickLeg(
     using namespace besktop;
     const double heading = direction < 0.0 ? -1.0 : 1.0;
     const double depthSign = leadLeg ? 1.0 : -1.0;
+    GaitVec3 target = SideKickFootTarget(sample, leadLeg, direction, planeSide);
+    GaitVec3 bendHint{heading, 0.0, depthSign * 0.18};
+    const double lowerBodyYaw =
+        (sample.bodyRotateY * sample.lowerBodyActionRotationWeight) +
+        sample.lowerBodyRotateY;
+    const double compensation = std::clamp(
+        sample.footTargetYawCompensationWeight, 0.0, 1.0);
+    if (compensation > 0.0) {
+        const GaitVec3 compensatedTarget = RotateAroundVerticalAxis(target, -lowerBodyYaw);
+        const GaitVec3 compensatedHint = RotateAroundVerticalAxis(bendHint, -lowerBodyYaw);
+        target = GaitVec3{
+            target.x + (compensatedTarget.x - target.x) * compensation,
+            target.y + (compensatedTarget.y - target.y) * compensation,
+            target.z + (compensatedTarget.z - target.z) * compensation,
+        };
+        bendHint = GaitVec3{
+            bendHint.x + (compensatedHint.x - bendHint.x) * compensation,
+            bendHint.y + (compensatedHint.y - bendHint.y) * compensation,
+            bendHint.z + (compensatedHint.z - bendHint.z) * compensation,
+        };
+    }
     return SolveTwoBoneIk(
         GaitVec3{},
-        SideKickFootTarget(sample, leadLeg, direction, planeSide),
+        target,
         planeSide * 0.40,
         planeSide * 0.41,
-        GaitVec3{heading, 0.0, depthSign * 0.18});
+        bendHint);
 }
 
 void TestSideKickGeometryAndEvents()
@@ -252,9 +273,11 @@ void TestSideKickGeometryAndEvents()
         const ActionSample leftSample = SampleAction(clip, time, -1.0);
         const TwoBoneIkSolution kickLeg = SolveSideKickLeg(rightSample, true, 1.0, planeSide);
         const TwoBoneIkSolution supportLeg = SolveSideKickLeg(rightSample, false, 1.0, planeSide);
+        const GaitVec3 supportFootInActionSpace = RotateAroundVerticalAxis(
+            supportLeg.end, rightSample.lowerBodyRotateY);
         maximumSupportDrift = std::max(
             maximumSupportDrift,
-            Distance(plantedSupport, supportLeg.end));
+            Distance(plantedSupport, supportFootInActionSpace));
 
         Check(std::abs(Distance(kickLeg.root, kickLeg.joint) - thighLength) < 1e-6,
             "side kick thigh keeps fixed length");
@@ -284,14 +307,37 @@ void TestSideKickGeometryAndEvents()
 
     const ActionSample prepare = SampleAction(clip, 0.18, 1.0);
     const ActionSample contact = SampleAction(clip, 0.37, 1.0);
+    const ActionSample rechamber = SampleAction(clip, 0.52, 1.0);
     const double prepareKnee = JointInteriorAngleDegrees(
         SolveSideKickLeg(prepare, true, 1.0, planeSide));
     const double contactKnee = JointInteriorAngleDegrees(
         SolveSideKickLeg(contact, true, 1.0, planeSide));
+    const double rechamberKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(rechamber, true, 1.0, planeSide));
     Check(prepareKnee >= 80.0 && prepareKnee <= 140.0,
         "side kick prepare clearly chambers the knee");
     Check(contactKnee >= 160.0 && contactKnee <= 176.0,
         "side kick contact extends without locking the knee");
+    Check(rechamberKnee >= 80.0 && rechamberKnee <= 140.0,
+        "side kick folds back into its chamber before landing");
+    Check(std::abs(contact.bodyRotateY) * 180.0 / kPi >= 25.0 &&
+        std::abs(contact.bodyRotateZ) * 180.0 / kPi >= 18.0 &&
+        contact.leadFootLift >= 0.49,
+        "side kick presents a higher side-on silhouette than front kick");
+    Check(std::abs(prepare.bodyRotateY) * 180.0 / kPi >= 70.0 &&
+        std::abs(contact.bodyRotateY - contact.lowerBodyRotateY) < 1e-9 &&
+        contact.footTargetYawCompensationWeight > 0.99,
+        "side kick turns shoulders and pelvis together before extension");
+    Check(contact.upperBodyOffsetForward <= -0.095 &&
+        contact.upperBodyOffsetY >= 0.17,
+        "side kick shifts only the upper body backward and down for balance");
+    Check(contact.leadHandForward >= 0.17 && contact.rearHandForward >= 0.15 &&
+        contact.leadArmBendForward >= 0.59 && contact.rearArmBendForward >= 0.61,
+        "side kick keeps both hands in a readable balance guard");
+    Check(contact.leadShoulderYOffset <= -0.045 &&
+        contact.rearShoulderYOffset >= 0.03 &&
+        std::abs(contact.bodyRotateX) < 1e-9,
+        "side kick raises the kicking-side shoulder without pitching the chest skyward");
     Check(maximumSupportDrift <= planeSide * 0.005,
         "side kick support foot remains planted");
 
@@ -304,7 +350,7 @@ void TestSideKickGeometryAndEvents()
         complete.handTargetWeight < 1e-9,
         "side kick completes at neutral pose");
     std::cout << "side kick metrics: prepare knee=" << prepareKnee
-              << ", contact knee=" << contactKnee
+              << ", contact/rechamber knee=" << contactKnee << "/" << rechamberKnee
               << ", support drift=" << maximumSupportDrift
               << ", thigh/shin=" << thighLength << "/" << shinLength << '\n';
 }
