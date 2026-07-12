@@ -500,6 +500,23 @@ bool IsFrontFaceVisible(const ActorPose& pose)
     return RotateActorVector(Vec3{0.0, 0.0, 1.0}, pose).z >= 0.0;
 }
 
+Vec3 ProjectedUpperBodyOffset(const ActorPose& pose, double planeSide)
+{
+    // This offset is deliberately projected as a standalone vector and is
+    // applied only after the icon and arm chains have been solved. In
+    // particular, it never enters ProjectActorPoint or ProjectLegChain.
+    // It follows the pelvis yaw and observation camera, but not the torso's
+    // own X/Z lean; otherwise a forty-five-degree slip consumes most of the
+    // intended screen-space lateral translation.
+    return besktop::RotateAroundVerticalAxis(
+        Vec3{
+            0.0,
+            pose.action.upperBodyOffsetY * planeSide,
+            pose.action.upperBodyOffsetDepth * planeSide,
+        },
+        pose.rotateY + pose.observationOrbitYaw);
+}
+
 struct BodyProjection {
     Gdiplus::PointF points[4]{};
     Gdiplus::PointF shadowPoints[4]{};
@@ -554,6 +571,13 @@ BodyProjection BuildBodyProjection(const besktop::IconFightScene::IconActor& act
         projection.points[1] = OffsetPoint(projection.points[1], -downAxis.x * expandBy, -downAxis.y * expandBy);
         projection.points[2] = OffsetPoint(projection.points[2], downAxis.x * expandBy, downAxis.y * expandBy);
         projection.points[3] = OffsetPoint(projection.points[3], downAxis.x * expandBy, downAxis.y * expandBy);
+    }
+
+    const Vec3 upperBodyOffset = ProjectedUpperBodyOffset(pose, planeSide);
+    projection.centerX += upperBodyOffset.x;
+    projection.centerY += upperBodyOffset.y;
+    for (Gdiplus::PointF& point : projection.points) {
+        point = OffsetPoint(point, upperBodyOffset.x, upperBodyOffset.y);
     }
 
     bodyBounds = BoundsForPoints(projection.points, std::size(projection.points));
@@ -617,6 +641,15 @@ struct LimbPose {
     JointChain leftLeg{};
     JointChain rightLeg{};
 };
+
+void OffsetJointChain(JointChain& chain, const Vec3& offset)
+{
+    chain.root = OffsetPoint(chain.root, offset.x, offset.y);
+    chain.joint = OffsetPoint(chain.joint, offset.x, offset.y);
+    chain.end = OffsetPoint(chain.end, offset.x, offset.y);
+    chain.depth += offset.z;
+    chain.frontLayer = chain.depth >= 0.0;
+}
 
 LocalJointChain BuildLocalChain(
     const Vec3& root,
@@ -881,6 +914,9 @@ LimbPose BuildLimbPose(
         leftShoulder, -1, leftDepthSign, pose, planeSide, upperArmLength, forearmLength, !rightLead);
     limbs.rightArm = BuildArmChain(
         rightShoulder, 1, rightDepthSign, pose, planeSide, upperArmLength, forearmLength, rightLead);
+    const Vec3 upperBodyOffset = ProjectedUpperBodyOffset(pose, planeSide);
+    OffsetJointChain(limbs.leftArm, upperBodyOffset);
+    OffsetJointChain(limbs.rightArm, upperBodyOffset);
     limbs.leftLeg = BuildLegChain(
         leftHip, -1, leftDepthSign, pose, lowerBodyPose, planeSide, thighLength, shinLength, !rightLead);
     limbs.rightLeg = BuildLegChain(

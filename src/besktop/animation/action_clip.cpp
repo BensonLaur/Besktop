@@ -441,6 +441,8 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         // slipping-side target rises slightly farther, producing a deeper
         // fixed-length IK bend without introducing a second leg solver.
         sample.rootOffsetY = 0.05 * slip;
+        sample.upperBodyOffsetDepth = side * 0.30 * slip;
+        sample.upperBodyOffsetY = 0.18 * slip;
         sample.leadFootLift = (slippingSideIsLead ? 0.065 : 0.05) * slip;
         sample.rearFootLift = (slippingSideIsLead ? 0.05 : 0.065) * slip;
         // Side slips bend around the actor's forward axis. This is distinct

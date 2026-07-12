@@ -77,6 +77,10 @@ struct ActionSample {
     double rootOffsetForward = 0.0;
     double rootOffsetLateral = 0.0;
     double rootOffsetY = 0.0;
+    // Upper-body-only translation. It is applied after body/arm projection so
+    // the planted pelvis, leg IK and foot targets cannot be affected.
+    double upperBodyOffsetDepth = 0.0;
+    double upperBodyOffsetY = 0.0;
     double hitStrength = 0.0;
     double punchStrength = 0.0;
     double kickStrength = 0.0;

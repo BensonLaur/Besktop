@@ -1158,6 +1158,11 @@ void TestDefenseAndFeedbackMathematics()
     Check(std::abs(std::abs(slipLeft.bodyRotateX) * 180.0 / kPi - 45.0) < 0.1 &&
         std::abs(slipLeft.bodyRotateZ) < 1e-9,
         "slips use a forty-five-degree side bend distinct from layback");
+    Check(slipLeft.upperBodyOffsetDepth < -0.29 &&
+        slipRight.upperBodyOffsetDepth > 0.29 &&
+        slipLeft.upperBodyOffsetY > 0.17 &&
+        std::abs(slipLeft.upperBodyOffsetY - slipRight.upperBodyOffsetY) < 1e-9,
+        "slips mirror an isolated upper-body translation toward the dodge side and down");
     const auto slipKneeAngle = [&](const ActionSample& sample, bool leadLeg) {
         const double depthSign = leadLeg ? 1.0 : -1.0;
         const double legSide = leadLeg ? 1.0 : -1.0;
