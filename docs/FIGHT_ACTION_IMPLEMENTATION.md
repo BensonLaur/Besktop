@@ -270,9 +270,24 @@ Debug 可直接设置 `BESKTOP_ACTION_PREVIEW`。Release 必须先设置 `BESKTO
 
 第一轮动作库补齐属于快速实现与人工微调阶段，本轮只复用现有目录验证 x64 Release：`besktop`、`besktop_action_tests` 构建通过，直接测试与 CTest 均通过，普通 Release 启动后 Esc 退出码为 `0`。全量演员 27 秒短测的大多数稳定窗口为 `31.0–32.0 FPS`、平均绘制约 `31.3–32.2 ms`；出现过一个 `28 FPS / 35.0 ms` 的短窗口，但未持续跌出当前约 30 FPS 基线。本结果不替代阶段收口时的 x64/Win32、长期资源和兼容性矩阵，也不包含 Codex 对动作视觉是否自然的判断。
 
-### 阶段 B：拳法、防守与打空
+### 阶段 B：固定双演员攻防闭环
 
-状态：**单演员动作数据已完成，双演员交互未开始**。
+状态：**固定诊断场景已完成；自动配对与全量战斗未开始**。
+
+新增独立 `combat_pair.*`，集中维护 `CombatScenarioId`、`CombatResult`、`CombatPairPhase`、`CombatPairPlan`、`CombatPairState` 和 `CombatContactProbe`。Pair 状态机依次经过 `Inactive → Approaching → Aligning → Settling → Exchanging → Recovering → Returning → Paused`：演员先从真实位置平滑靠近工作区中央安全站位，使用现有连续转身面对彼此，稳定 `0.30` 秒后才启动共享时间线；完成结果动作后平滑返回站位再循环，不在用户可见阶段瞬移。
+
+`BESKTOP_COMBAT_PREVIEW` 支持四个固定场景：
+
+| 场景 | 攻击 | 防守/结果 | 攻击 Contact | 防守启动 | 预期结果 |
+| --- | --- | --- | ---: | ---: | --- |
+| `lead_parry` | `lead_straight` | `parry` | 0.30 s | 0.10 s | `Blocked` |
+| `lead_slip` | `lead_straight` | `slip_left` | 0.30 s | 0.06 s | `Evaded`，攻击者随后 `whiff_recovery` |
+| `uppercut_light_hit` | `uppercut` | Contact 后 `light_hit_react` | 0.38 s | 0.38 s | `HitLight` |
+| `side_kick_heavy_hit` | `side_kick` | Contact 后 `heavy_stagger` | 0.35 s | 0.35 s | `HitHeavy` |
+
+Contact 精确时刻使用与绘制相同的 `BuildPose`、`BuildLimbPose` 和固定骨长 IK：拳法读取攻击手端，踢击读取攻击脚端，目标为防守者投影肩中心—胯中心轴周围的胶囊。判定顺序为宽相距离/方向、拳法 Parry、Evade 窗口加实际离线、身体胶囊命中、其余 Whiff。场景的预期结果只用于诊断核对，不会替代实际几何。
+
+`heavy_stagger` 完成后提交其 `-0.16 planeSide` 根位移为新的 B 位置；`whiff_recovery` 净位移为零。结果完成后 Pair 再从当前系统位置平滑返回交互站位，所有位置继续受工作区边界和任务栏避让约束。
 
 - 复用已完成的 `rear_straight`、`uppercut`、`hook`、`swing_punch` 单演员 clip。
 - 复用已完成的 `slip_left/right`、`parry`、`whiff_recovery` 与可查询防守窗口。
@@ -283,7 +298,7 @@ Debug 可直接设置 `BESKTOP_ACTION_PREVIEW`。Release 必须先设置 `BESKTO
 
 ### 阶段 C：腿法、转身与重击反馈
 
-状态：**单演员动作数据已完成，双演员交互未开始**。
+状态：**单演员动作数据已完成；本阶段尚未接入固定双演员场景**。
 
 - 复用已完成的 `front_kick`、`side_kick`、`roundhouse_kick`、`spinning_back_kick` 单演员 clip。
 - 复用已完成的 `heavy_stagger` 反馈 clip。
@@ -377,4 +392,4 @@ Debug 可以直接使用；Release 必须先设置 `BESKTOP_ENABLE_DIAGNOSTICS=1
 
 ## 推荐的下一个实现任务
 
-第一轮单演员动作库已完成并具备纯逻辑测试。下一任务应单独进入固定双演员预览，把现有攻击、防守窗口与结果反馈接入同一时间线；在此之前默认演出仍保持纯漫游，不应直接跳到全量自动群架。
+第一轮单演员动作库和固定双演员诊断闭环均已具备纯逻辑测试。默认 Release 仍保持全部演员觉醒与自由漫游；下一阶段应实现轻量 `CombatDirector` 的受控配对与空间预约，不应直接跳到全量自动群架。

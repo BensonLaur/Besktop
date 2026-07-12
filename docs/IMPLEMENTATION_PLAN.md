@@ -149,7 +149,8 @@ Recovering
 - 步态与两段 IK 使用独立纯数学模块，固定两段骨长并覆盖支撑相、摆动屈膝、落地前伸展、左右镜像和大腿夹角测试；两条腿不再长期同时屈膝或朝向同一侧，腿型活动范围扩大后统一使用工作区内的四肢安全边距。
 - 动作系统后续应迁移为 `AnimationClip + KeyPose + IKTarget + ContactEvent + RootMotion`。
 - 先建立动作播放骨架与单人预览，再依次加入拳法/防守、腿法/重击反馈和受控互动导演；不要把第一轮动作塞进一个巨大提交。
-- 第一轮单演员动作库已完成：独立动作 clip/player、统一五阶段、攻击一次性 Contact、可查询防守窗口、每演员动作状态和首演员诊断预览已经接入。16 个公开预览 ID 均使用通用手脚 IK、身体/下半身旋转与 root offset 通道；当前仍不启用配对、真实命中、伤害或自动战斗。
+- 第一轮单演员动作库已完成：独立动作 clip/player、统一五阶段、攻击一次性 Contact、可查询防守窗口、每演员动作状态和首演员诊断预览已经接入。16 个公开预览 ID 均使用通用手脚 IK、身体/下半身旋转与 root offset 通道。
+- 固定双演员诊断闭环已接入：前两个演员觉醒后平滑靠近中央安全站位、面对彼此、按共享时间线执行四个固定场景，并以实际拳脚端点、目标身体轴胶囊和防守窗口得出 `Blocked`、`Evaded`、`Whiffed`、`HitLight` 或 `HitHeavy`。默认演出仍不启用自动配对、伤害或自动战斗。
 - 漫游转向已从瞬时 `facing` 翻转改为独立 `TurnMotionState`：当前朝向和目标朝向分离，反向目标先退出步态，再原地完成 `0.40` 秒连续 Y 轴转身，最后提交新朝向并恢复行走。角色根节点、肩部中心和胯部中心组成固定身体中轴；图标中心位于移动方向后方，并按“肢体半径 + 可见净空”与轴分离后绕轴走圆弧。图标薄片、肩胯和四肢共享局部 3D yaw，挂点不再单帧换边，前后层按投影平均深度交换；转身不属于攻击动作，也不发出 Contact。
 - 白色手脚使用两段式骨架：手臂为肩膀、肘、手；腿为胯、膝、脚。
 - 肩膀和胯部位于图标薄片之外的局部 3D 空间，不直接贴在图标平面内。
@@ -213,6 +214,7 @@ $env:BESKTOP_ANIMATION_SPEED='0.5'
 $env:BESKTOP_ANIMATION_OFFSET='4.5'
 $env:BESKTOP_MAX_ACTORS='10'
 $env:BESKTOP_ACTION_PREVIEW='lead_straight'
+$env:BESKTOP_COMBAT_PREVIEW='lead_parry'
 ```
 
 Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP_ENABLE_DIAGNOSTICS=1`；未设置总开关时，Release 会忽略单项调试变量，并保持 `1.0x` 动画速度、`0` 秒偏移和低噪声 Warning/Error 日志。
@@ -222,7 +224,9 @@ Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP
 - `BESKTOP_ANIMATION_SPEED` 用于慢放或加速动画，默认 `1.0`。
 - `BESKTOP_ANIMATION_OFFSET` 用于从指定动画秒数开始，减少等待左走、右走、转身、出拳等阶段的时间。
 - `BESKTOP_MAX_ACTORS` 用于限制本次演出的演员数量，便于对比不同图标规模的帧率；未设置或设为 `0` 时保持全部觉醒。
-- `BESKTOP_ACTION_PREVIEW` 支持第一轮全部 16 个公开动作 ID，用于首演员原地循环预览；普通 Release 未打开诊断总开关时会忽略该变量。下一阶段先建立固定双演员交互，不直接开启全量群架。
+- `BESKTOP_ACTION_PREVIEW` 支持第一轮全部 16 个公开动作 ID，用于首演员原地循环预览。
+- `BESKTOP_COMBAT_PREVIEW` 支持四个固定双演员场景，推荐配合 `BESKTOP_MAX_ACTORS=2`；普通 Release 未打开诊断总开关时会忽略该变量。诊断优先级为 Combat、Turn、Action、默认漫游。
+- 固定预览之后的下一阶段是轻量 `CombatDirector`，负责受控配对和空间预约；当前不直接开启全量群架，也没有生命值或胜负。
 - `BESKTOP_TURN_PREVIEW=1` 用于首演员原地循环左右转身；Debug 可直接使用，Release 只有在 `BESKTOP_ENABLE_DIAGNOSTICS=1` 时才会读取。
 
 新增动作或视觉效果前后必须按 [RENDER_PERFORMANCE.md](RENDER_PERFORMANCE.md) 复测全量演员和小规模对照组，记录稳定帧、动作高峰帧、分阶段耗时和资源稳定性。
