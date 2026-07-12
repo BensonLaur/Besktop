@@ -1188,8 +1188,35 @@ void TestDefenseAndFeedbackMathematics()
 
     const ActionSample parry = SampleAction(GetActionClip(ActionId::Parry), 0.25, 1.0);
     Check(parry.leadHandTargetEnabled && parry.leadHandDepth > 0.35 &&
-        parry.leadHandForward < 0.25,
+        parry.leadHandForward < 0.35,
         "parry uses a compact outward lead-arm target");
+    Check(parry.rearHandTargetEnabled && parry.rearHandForward >= 0.17 &&
+        parry.rearHandY > -0.02 && parry.rearArmBendForward > 0.60,
+        "parry keeps the rear hand in the reviewed center guard");
+    Check(!parry.leadFootTargetEnabled && !parry.rearFootTargetEnabled &&
+        std::abs(parry.rootOffsetForward) < 1e-9 &&
+        std::abs(parry.rootOffsetLateral) < 1e-9 &&
+        std::abs(parry.rootOffsetY) < 1e-9,
+        "parry leaves the lower body and root planted");
+    Check(std::abs(parry.bodyRotateY) * 180.0 / kPi >= 17.5 &&
+        parry.leadShoulderForwardOffset >= 0.055 &&
+        parry.rearShoulderForwardOffset <= -0.025 &&
+        parry.leadShoulderYOffset < parry.rearShoulderYOffset,
+        "parry exaggerates the shoulder-line counter-motion for the icon silhouette");
+    const TwoBoneIkSolution parryLeadArm = SolveActionArm(parry, true, 1.0, planeSide);
+    const TwoBoneIkSolution parryRearArm = SolveActionArm(parry, false, 1.0, planeSide);
+    const double parryLeadElbow = JointInteriorAngleDegrees(parryLeadArm);
+    const double parryRearElbow = JointInteriorAngleDegrees(parryRearArm);
+    std::cout << "parry metrics: lead/rear elbow=" << parryLeadElbow << "/"
+              << parryRearElbow << '\n';
+    Check(parryLeadElbow >= 65.0 && parryLeadElbow <= 110.0,
+        "parry keeps the sweeping lead elbow visibly bent");
+    Check(parryRearElbow >= 40.0 && parryRearElbow <= 65.0,
+        "parry preserves the reviewed compact rear-hand guard geometry");
+    const ActionSample mirroredParry = SampleAction(GetActionClip(ActionId::Parry), 0.25, -1.0);
+    Check(std::abs(JointInteriorAngleDegrees(SolveActionArm(
+        mirroredParry, true, -1.0, planeSide)) - parryLeadElbow) < 1e-9,
+        "parry lead-arm geometry mirrors without changing its elbow angle");
 
     const ActionClip& lightClip = GetActionClip(ActionId::LightHitReact);
     const ActionClip& heavyClip = GetActionClip(ActionId::HeavyStagger);

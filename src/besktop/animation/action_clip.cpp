@@ -466,10 +466,30 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         const double parry = HoldAndReturn(time, 0.0, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.leadHandForward = 0.12 + 0.08 * parry;
-        sample.leadHandY = -0.27 - 0.06 * parry;
-        sample.leadHandDepth = 0.24 + 0.20 * parry;
-        sample.bodyRotateY = mirror * 5.0 * parry * kPi / 180.0;
+        // A parry is a compact lead-forearm sweep, not a raised block. Start
+        // from the reviewed in-front guard, keep the elbow bent and carry the
+        // fist a short distance outward while the rear hand protects center.
+        sample.leadHandForward = 0.26 + 0.04 * parry;
+        sample.leadHandY = -0.04 - 0.10 * parry;
+        sample.leadHandDepth = 0.14 + 0.32 * parry;
+        sample.leadArmBendForward = 0.48;
+        sample.rearHandForward = 0.18;
+        sample.rearHandY = -0.01;
+        sample.rearHandDepth = 0.12;
+        sample.rearArmBendForward = 0.62;
+        // The icon actor has no visible chest or shoulder blades, so the
+        // shoulder-line counter-motion must be exaggerated enough to carry
+        // the icon plane. The lead shoulder advances, lifts and opens while
+        // the rear shoulder retracts and settles.
+        sample.leadShoulderForwardOffset = 0.06 * parry;
+        sample.leadShoulderYOffset = -0.025 * parry;
+        sample.leadShoulderDepthOffset = 0.055 * parry;
+        sample.rearShoulderForwardOffset = -0.03 * parry;
+        sample.rearShoulderYOffset = 0.015 * parry;
+        sample.rearShoulderDepthOffset = -0.015 * parry;
+        sample.bodyRotateX = 4.0 * parry * kPi / 180.0;
+        sample.bodyRotateY = mirror * 18.0 * parry * kPi / 180.0;
+        sample.bodyRotateZ = mirror * -2.5 * parry * kPi / 180.0;
         break;
     }
     case ActionId::FrontKick:
