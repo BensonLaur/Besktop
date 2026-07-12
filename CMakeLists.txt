@@ -100,9 +100,16 @@ add_executable(besktop_combat_tests
 )
 target_link_libraries(besktop_combat_tests PRIVATE besktop_animation)
 
+add_executable(besktop_runtime_options_tests
+    tests/runtime_options_tests.cpp
+    src/besktop/app/runtime_options.cpp
+)
+target_link_libraries(besktop_runtime_options_tests PRIVATE besktop_animation)
+
 enable_testing()
 add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 add_test(NAME besktop_combat_tests COMMAND besktop_combat_tests)
+add_test(NAME besktop_runtime_options_tests COMMAND besktop_runtime_options_tests)
 
 foreach(target_name IN ITEMS besktop besktop_mvp_cli)
     target_link_libraries(${target_name} PRIVATE besktop_runtime)
@@ -125,5 +132,7 @@ if(MSVC)
     set_property(TARGET besktop_action_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_combat_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_runtime_options_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()

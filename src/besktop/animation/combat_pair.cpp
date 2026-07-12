@@ -25,6 +25,8 @@ besktop::CombatPairPlan MakePlan(
             std::max(0.0, attackClip.activeEnd - defenderWindowTarget),
         attackClip.activeEnd,
         result,
+        result == besktop::CombatResult::HitHeavy ?
+            besktop::ActionHitStrength::Heavy : besktop::ActionHitStrength::Light,
         distanceScale,
         targetHeightScale,
         0.30,
@@ -72,7 +74,7 @@ const besktop::CombatPairPlan& UppercutLightHitPlan()
         besktop::ActionId::None,
         0.0,
         besktop::CombatResult::HitLight,
-        1.04,
+        0.62,
         -0.20);
     return plan;
 }

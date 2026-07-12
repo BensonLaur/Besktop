@@ -43,6 +43,7 @@ struct CombatPairPlan {
     double defenderStartTime = 0.0;
     double expectedContactTime = 0.0;
     CombatResult expectedResult = CombatResult::None;
+    ActionHitStrength contactStrength = ActionHitStrength::None;
     double desiredAxisDistanceScale = 1.0;
     double targetHeightScale = 0.0;
     double settlingDuration = 0.30;

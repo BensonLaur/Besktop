@@ -1803,11 +1803,11 @@ void IconFightScene::UpdateCombatPreview(double deltaSeconds, double actionDelta
         probe.attackRadius = planeSide * 0.13;
         probe.attackType = GetActionClip(plan.attackerAction).attackType == ActionAttackType::Kick ?
             CombatAttackType::Kick : CombatAttackType::Punch;
-        probe.hitStrength = GetActionClip(plan.attackerAction).hitStrength;
+        probe.hitStrength = plan.contactStrength;
         probe.attackDirection = {attackerDirection, 0.0};
         probe.targetAxisTop = shoulderCenter;
         probe.targetAxisBottom = hipCenter;
-        probe.targetRadius = planeSide * 0.48;
+        probe.targetRadius = planeSide * 0.35;
         probe.actorAxisDistance = std::abs(defender.x - attacker.x);
         probe.maximumAxisDistance = planeSide * (plan.desiredAxisDistanceScale + 0.18);
         probe.defenseWindow = plan.defenderAction == ActionId::None ?
