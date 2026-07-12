@@ -987,8 +987,13 @@ void TestKickPoseMathematics()
             const ActionSample sample = SampleAction(clip, time, 1.0);
             const TwoBoneIkSolution kickLeg = SolveSideKickLeg(sample, true, 1.0, planeSide);
             const TwoBoneIkSolution supportLeg = SolveSideKickLeg(sample, false, 1.0, planeSide);
+            const double lowerBodyYaw =
+                (sample.bodyRotateY * sample.lowerBodyActionRotationWeight) +
+                sample.lowerBodyRotateY;
+            const GaitVec3 supportInActionSpace = RotateAroundVerticalAxis(
+                supportLeg.end, lowerBodyYaw);
             maximumSupportDrift = std::max(
-                maximumSupportDrift, Distance(plantedSupport, supportLeg.end));
+                maximumSupportDrift, Distance(plantedSupport, supportInActionSpace));
             const GaitVec3 projectedSupport = RotateAroundVerticalAxis(
                 supportLeg.end, sample.lowerBodyRotateY);
             maximumProjectedSupportDrift = std::max(
@@ -1003,7 +1008,7 @@ void TestKickPoseMathematics()
         }
     }
     Check(maximumSupportDrift <= planeSide * 0.005,
-        "new kicks keep the support foot planted in local action space");
+        "new kicks keep the support foot planted in action space");
     Check(maximumProjectedSupportDrift <= planeSide * 0.12,
         "new kick support-foot rotation stays within a bounded visual tolerance");
 
@@ -1034,12 +1039,35 @@ void TestKickPoseMathematics()
         "front kick does not slide the planted actor root");
 
     const ActionSample sideContact = SampleAction(GetActionClip(ActionId::SideKick), 0.38, 1.0);
+    const ActionSample roundPrepare = SampleAction(GetActionClip(ActionId::RoundhouseKick), 0.22, 1.0);
     const ActionSample roundContact = SampleAction(GetActionClip(ActionId::RoundhouseKick), 0.46, 1.0);
+    const ActionSample roundRechamber = SampleAction(GetActionClip(ActionId::RoundhouseKick), 0.61, 1.0);
     Check(std::abs(frontContact.leadFootDepthOffset - sideContact.leadFootDepthOffset) >= 0.015,
         "front and side kick foot directions are distinct");
     Check(std::abs(roundContact.leadFootDepthOffset) >
         std::abs(frontContact.leadFootDepthOffset) + 0.25,
         "roundhouse has a larger depth sweep than front kick");
+    const double roundPrepareKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(roundPrepare, true, 1.0, planeSide));
+    const double roundContactKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(roundContact, true, 1.0, planeSide));
+    const double roundRechamberKnee = JointInteriorAngleDegrees(
+        SolveSideKickLeg(roundRechamber, true, 1.0, planeSide));
+    Check(roundPrepareKnee >= 70.0 && roundPrepareKnee <= 140.0 &&
+        roundRechamberKnee >= 70.0 && roundRechamberKnee <= 140.0,
+        "roundhouse chambers before and after the horizontal sweep");
+    Check(roundContactKnee >= 145.0 && roundContactKnee <= 176.0,
+        "roundhouse snaps outward without locking or staying folded");
+    Check(std::abs(roundPrepare.lowerBodyRotateY) * 180.0 / kPi >= 45.0 &&
+        std::abs(roundContact.bodyRotateY) * 180.0 / kPi >= 58.0 &&
+        std::abs(roundContact.lowerBodyRotateY) * 180.0 / kPi >= 50.0 &&
+        roundContact.footTargetYawCompensationWeight > 0.99,
+        "roundhouse turns the pelvis before the leg sweep and anchors its foot targets");
+    Check(roundContact.leadFootLift >= 0.43 &&
+        roundContact.leadFootDepthOffset >= 0.47 &&
+        roundContact.leadHandForward >= 0.15 &&
+        roundContact.rearHandForward >= 0.18,
+        "roundhouse combines a high depth arc with a guarded upper body");
 
     const ActionClip& spinClip = GetActionClip(ActionId::SpinningBackKick);
     double maximumSpinYaw = 0.0;
@@ -1059,6 +1087,8 @@ void TestKickPoseMathematics()
 
     std::cout << "kick metrics: front knee=" << frontPrepareKnee << "->" << frontContactKnee
               << "->" << frontRechamberKnee
+              << ", round knee=" << roundPrepareKnee << "->" << roundContactKnee
+              << "->" << roundRechamberKnee
               << ", depth front/side/round=" << frontContact.leadFootDepthOffset << "/"
               << sideContact.leadFootDepthOffset << "/" << roundContact.leadFootDepthOffset
               << ", support drift=" << maximumSupportDrift
