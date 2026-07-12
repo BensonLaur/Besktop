@@ -88,6 +88,16 @@ struct ActionSample {
     double rearHandForward = 0.0;
     double rearHandY = 0.0;
     double rearHandDepth = 0.0;
+    double leadArmBendForward = 0.0;
+    double rearArmBendForward = 0.0;
+    // Local shoulder-girdle offsets, expressed as fractions of planeSide.
+    // Forward follows the actor's canonical facing; positive Y points down.
+    double leadShoulderForwardOffset = 0.0;
+    double leadShoulderYOffset = 0.0;
+    double leadShoulderDepthOffset = 0.0;
+    double rearShoulderForwardOffset = 0.0;
+    double rearShoulderYOffset = 0.0;
+    double rearShoulderDepthOffset = 0.0;
     double handTargetWeight = 0.0;
     bool leadHandTargetEnabled = false;
     bool rearHandTargetEnabled = false;

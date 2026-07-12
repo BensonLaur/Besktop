@@ -472,11 +472,12 @@ Vec3 RotateActorVector(const Vec3& local, const ActorPose& pose)
     const double yAfterX = local.y * cosX - zAfterY * sinX;
     const double zAfterX = local.y * sinX + zAfterY * cosX;
 
-    return Vec3{
+    const Vec3 bodyRotated{
         xAfterY * cosZ - yAfterX * sinZ,
         xAfterY * sinZ + yAfterX * cosZ,
         zAfterX,
     };
+    return besktop::RotateAroundVerticalAxis(bodyRotated, pose.observationOrbitYaw);
 }
 
 ProjectedPoint ProjectActorPoint(const Vec3& local, const ActorPose& pose, double planeSide)
@@ -666,11 +667,14 @@ JointChain ProjectJointChain(const LocalJointChain& local, const ActorPose& pose
 
 JointChain ProjectLegChain(
     const LocalJointChain& local,
-    const ActorPose& rootPose,
     const ActorPose& lowerBodyPose,
     double planeSide)
 {
-    const ProjectedPoint root = ProjectActorPoint(local.root, rootPose, planeSide);
+    // Hip, knee and foot belong to one lower-body hierarchy. Projecting the
+    // hip with the upper-body action pose while projecting the other joints
+    // with the lower-body pose creates a false reversed-knee silhouette when
+    // defensive actions isolate torso rotation.
+    const ProjectedPoint root = ProjectActorPoint(local.root, lowerBodyPose, planeSide);
     const ProjectedPoint joint = ProjectActorPoint(local.joint, lowerBodyPose, planeSide);
     const ProjectedPoint end = ProjectActorPoint(local.end, lowerBodyPose, planeSide);
 
@@ -729,6 +733,8 @@ JointChain BuildArmChain(
         const double forward = leadArm ? action.leadHandForward : action.rearHandForward;
         const double targetY = leadArm ? action.leadHandY : action.rearHandY;
         const double targetDepth = leadArm ? action.leadHandDepth : action.rearHandDepth;
+        const double bendForward = leadArm ?
+            action.leadArmBendForward : action.rearArmBendForward;
         const Vec3 target{
             shoulder.x + headingSign * forward * planeSide,
             targetY * planeSide,
@@ -739,7 +745,7 @@ JointChain BuildArmChain(
             target,
             upperArmLength,
             forearmLength,
-            Vec3{0.0, 1.0, depthSign * 0.25});
+            Vec3{headingSign * bendForward, 1.0, depthSign * 0.25});
         const double weight = Clamp01(action.handTargetWeight);
         local.joint.x = LerpValue(local.joint.x, actionChain.joint.x, weight);
         local.joint.y = LerpValue(local.joint.y, actionChain.joint.y, weight);
@@ -805,7 +811,27 @@ JointChain BuildLegChain(
         thighLength,
         shinLength,
         bendHint);
-    return ProjectLegChain(local, pose, lowerBodyPose, planeSide);
+    return ProjectLegChain(local, lowerBodyPose, planeSide);
+}
+
+Vec3 ApplyActionShoulderOffset(
+    const Vec3& neutralShoulder,
+    double depthSign,
+    const besktop::ActionSample& action,
+    bool leadShoulder,
+    double planeSide)
+{
+    const double forward = leadShoulder ?
+        action.leadShoulderForwardOffset : action.rearShoulderForwardOffset;
+    const double offsetY = leadShoulder ?
+        action.leadShoulderYOffset : action.rearShoulderYOffset;
+    const double depth = leadShoulder ?
+        action.leadShoulderDepthOffset : action.rearShoulderDepthOffset;
+    return Vec3{
+        neutralShoulder.x + forward * planeSide,
+        neutralShoulder.y + offsetY * planeSide,
+        neutralShoulder.z + depthSign * depth * planeSide,
+    };
 }
 
 LimbPose BuildLimbPose(
@@ -822,15 +848,12 @@ LimbPose BuildLimbPose(
     const double hipDownOut = std::clamp(planeSide * 0.18, 12.0, 24.0);
     constexpr double shoulderRootX = 0.0;
     const double shoulderRootY = -halfH * 0.20;
-    const Vec3 leftShoulder{shoulderRootX, shoulderRootY, leftDepthSign * shoulderDepth};
-    const Vec3 rightShoulder{shoulderRootX, shoulderRootY, rightDepthSign * shoulderDepth};
+    const Vec3 neutralLeftShoulder{shoulderRootX, shoulderRootY, leftDepthSign * shoulderDepth};
+    const Vec3 neutralRightShoulder{shoulderRootX, shoulderRootY, rightDepthSign * shoulderDepth};
     const double hipRootY = halfH + hipDownOut;
     const double hipRootX = smallHipExtraOut;
     const Vec3 leftHip{hipRootX, hipRootY, leftDepthSign * hipDepth};
     const Vec3 rightHip{hipRootX, hipRootY, rightDepthSign * hipDepth};
-    const bool rightFront =
-        RotateActorVector(rightShoulder, pose).z >= RotateActorVector(leftShoulder, pose).z;
-
     const double upperArmLength = planeSide * 0.30;
     const double forearmLength = planeSide * 0.32;
     const double thighLength = planeSide * 0.40;
@@ -845,8 +868,15 @@ LimbPose BuildLimbPose(
     lowerBodyPose.rotateY += pose.action.lowerBodyRotateY;
     lowerBodyPose.rotateZ += pose.action.lowerBodyRotateZ;
 
+    // Camera orbit changes only the view. Logical lead/rear limbs continue to
+    // follow the actor's committed facing and never swap at a side-on view.
+    const bool rightLead = pose.facing > 0.0;
+    const Vec3 leftShoulder = ApplyActionShoulderOffset(
+        neutralLeftShoulder, leftDepthSign, pose.action, !rightLead, planeSide);
+    const Vec3 rightShoulder = ApplyActionShoulderOffset(
+        neutralRightShoulder, rightDepthSign, pose.action, rightLead, planeSide);
+
     LimbPose limbs;
-    const bool rightLead = rightFront;
     limbs.leftArm = BuildArmChain(
         leftShoulder, -1, leftDepthSign, pose, planeSide, upperArmLength, forearmLength, !rightLead);
     limbs.rightArm = BuildArmChain(
@@ -1177,6 +1207,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     previousElapsedSeconds_ = 0.0;
     phase_ = ScenePhase::Sleeping;
     previewAction_ = GetRuntimeOptions().actionPreview;
+    actionOrbitCameraEnabled_ = GetRuntimeOptions().actionOrbitCameraEnabled;
     turnPreviewEnabled_ = GetRuntimeOptions().turnPreviewEnabled;
 
     const unsigned char colors[][3] = {
@@ -1283,6 +1314,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.usedIconImageFallback = actor.iconImage == nullptr;
         actor.turnPreviewActor = index == 0 && turnPreviewEnabled_;
         actor.actionPreviewActor = index == 0 && previewAction_ != ActionId::None && !actor.turnPreviewActor;
+        actor.actionOrbitCameraEnabled = actor.actionPreviewActor && actionOrbitCameraEnabled_;
         actors_.push_back(actor);
     }
 
@@ -1306,6 +1338,9 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     LogInfo(std::wstring(L"icon fight debug icon plane: ") + (DebugIconPlaneEnabled() ? L"enabled" : L"disabled"));
     if (previewAction_ != ActionId::None && !turnPreviewEnabled_ && !actors_.empty()) {
         LogInfo(L"action preview enabled: " + std::wstring(ActionIdName(previewAction_)));
+        if (actionOrbitCameraEnabled_) {
+            LogInfo(L"action orbit camera enabled; duration: 8 animation seconds");
+        }
     }
     if (turnPreviewEnabled_ && !actors_.empty()) {
         LogInfo(L"turn preview enabled");
@@ -1402,6 +1437,9 @@ void IconFightScene::Update(double elapsedSeconds)
             actor.x = actor.baseX;
             actor.y = actor.baseY;
             updateLocomotionWeight(0.0);
+            if (actor.actionOrbitCameraEnabled) {
+                actor.actionOrbitElapsedSeconds += actionDeltaSeconds;
+            }
             if (actor.actionPlayer.State().actionId == ActionId::None) {
                 actor.actionPreviewPauseRemaining = std::max(
                     0.0, actor.actionPreviewPauseRemaining - actionDeltaSeconds);
@@ -1546,6 +1584,10 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
     const LONGLONG poseStart = timings != nullptr ? PerformanceCounterNow() : 0;
     for (size_t index = 0; index < actors_.size(); ++index) {
         poseCache_[index] = BuildPose(actors_[index], elapsedSeconds_);
+        if (actors_[index].actionOrbitCameraEnabled) {
+            poseCache_[index].observationOrbitYaw = SampleObservationOrbitYaw(
+                actors_[index].actionOrbitElapsedSeconds);
+        }
     }
     const LONGLONG actorPrepStart = timings != nullptr ? PerformanceCounterNow() : 0;
     for (size_t index = 0; index < actors_.size(); ++index) {

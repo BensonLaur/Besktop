@@ -149,6 +149,16 @@ double BlendTurnLocomotion(double currentWeight, double targetWeight, double del
     return Clamp01(result);
 }
 
+double SampleObservationOrbitYaw(double elapsedSeconds, double durationSeconds)
+{
+    if (!std::isfinite(elapsedSeconds) || !std::isfinite(durationSeconds) ||
+        elapsedSeconds <= 0.0 || durationSeconds <= 0.0) {
+        return 0.0;
+    }
+    const double wrappedSeconds = std::fmod(elapsedSeconds, durationSeconds);
+    return wrappedSeconds * (2.0 * kPi / durationSeconds);
+}
+
 GaitVec3 RotateAroundVerticalAxis(const GaitVec3& local, double yaw)
 {
     const double cosine = std::cos(yaw);

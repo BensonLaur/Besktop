@@ -242,12 +242,33 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         const double strike = HoldAndReturn(time, clip.prepareEnd, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.bodyRotateY = mirror * ((-4.0 * prepare) + (13.0 * strike)) * kPi / 180.0 * actionWeight;
-        sample.bodyRotateZ = mirror * -3.0 * kPi / 180.0 * strike;
-        sample.rootOffsetForward = 0.025 * strike;
+        // Drive the punch from the shoulder girdle and torso instead of
+        // treating the fist as an isolated end effector. Pitch lifts the lead
+        // shoulder and drops the rear shoulder because their local depths are
+        // opposite; yaw advances/retracts them around the shared body axis.
+        sample.bodyRotateX = 4.0 * kPi / 180.0 * strike;
+        sample.bodyRotateY = mirror * ((-4.0 * prepare) + (15.0 * strike)) * kPi / 180.0 * actionWeight;
+        sample.bodyRotateZ = mirror * -3.5 * kPi / 180.0 * strike;
+        sample.rootOffsetForward = 0.04 * strike;
+        sample.rootOffsetY = 0.018 * strike;
         sample.punchStrength = strike;
-        sample.leadHandForward = -0.03 * prepare + 0.59 * strike;
-        sample.leadHandY = -0.04 + 0.04 * strike;
+        sample.leadShoulderForwardOffset = 0.05 * strike;
+        sample.leadShoulderYOffset = -0.02 * strike;
+        sample.rearShoulderForwardOffset = -0.02 * strike;
+        sample.rearShoulderYOffset = 0.012 * strike;
+        // The striking hand starts and recovers in a real guard target rather
+        // than collapsing back onto its shoulder. This keeps the fixed-length
+        // two-bone arm from folding into a false elbow-strike silhouette.
+        sample.leadHandForward = 0.32 - 0.02 * prepare + 0.29 * strike;
+        sample.leadHandY = -0.12 + 0.12 * strike;
+        sample.leadHandDepth = 0.08 + 0.16 * strike;
+        // Keep the non-striking hand in a compact guard in front of the
+        // torso. The lower target works with the downward IK bend hint so the
+        // elbow stays below the shoulder instead of reading as an elbow hit.
+        sample.rearHandForward = 0.18;
+        sample.rearHandY = -0.01;
+        sample.rearHandDepth = 0.12;
+        sample.rearArmBendForward = 0.62;
         break;
     }
     case ActionId::RearStraight: {
@@ -255,13 +276,32 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         const double strike = HoldAndReturn(time, clip.prepareEnd, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.bodyRotateY = mirror * (-8.0 * coil + 24.0 * strike) * kPi / 180.0;
-        sample.bodyRotateZ = mirror * -4.0 * strike * kPi / 180.0;
-        sample.rootOffsetForward = 0.04 * strike;
+        // Load the rear shoulder behind the body axis, then drive it through
+        // with a larger torso turn than the lead straight. Negative pitch
+        // raises the rear shoulder and lowers the lead shoulder because the
+        // rear shoulder occupies the opposite local depth plane.
+        sample.bodyRotateX = -5.0 * kPi / 180.0 * strike;
+        sample.bodyRotateY = mirror * (8.0 * coil - 24.0 * strike) * kPi / 180.0;
+        sample.bodyRotateZ = mirror * -4.5 * strike * kPi / 180.0;
+        sample.rootOffsetForward = 0.055 * strike;
+        sample.rootOffsetY = 0.022 * strike;
         sample.punchStrength = strike;
-        sample.rearHandForward = -0.06 * coil + 0.60 * strike;
-        sample.rearHandY = -0.03;
-        sample.rearHandDepth = 0.22;
+        sample.rearShoulderForwardOffset = 0.065 * strike;
+        sample.rearShoulderYOffset = -0.025 * strike;
+        sample.leadShoulderForwardOffset = -0.025 * strike;
+        sample.leadShoulderYOffset = 0.014 * strike;
+        // The rear fist travels from a stable guard through one long
+        // extension. Keeping a real guard target avoids a false elbow strike
+        // during both the load and recovery portions of the clip.
+        sample.rearHandForward = 0.32 - 0.02 * coil + 0.30 * strike;
+        sample.rearHandY = -0.12 + 0.12 * strike;
+        sample.rearHandDepth = 0.08 + 0.15 * strike;
+        // The lead hand stays compact in front of the torso while the rear
+        // shoulder rotates through the punch.
+        sample.leadHandForward = 0.18;
+        sample.leadHandY = -0.01;
+        sample.leadHandDepth = 0.12;
+        sample.leadArmBendForward = 0.62;
         break;
     }
     case ActionId::Uppercut: {
@@ -269,42 +309,122 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         const double strike = HoldAndReturn(time, clip.prepareEnd, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.bodyRotateX = (5.0 * load - 8.0 * strike) * kPi / 180.0;
-        sample.bodyRotateY = mirror * 14.0 * strike * kPi / 180.0;
-        sample.rootOffsetY = 0.055 * load - 0.035 * strike;
+        // Compress slightly into the rear side, then release upward through
+        // the rear shoulder. The rear shoulder is the striking shoulder for
+        // this first uppercut clip, matching rear_straight's logical side.
+        sample.bodyRotateX = (3.0 * load - 7.0 * strike) * kPi / 180.0;
+        sample.bodyRotateY = mirror * (5.0 * load - 14.0 * strike) * kPi / 180.0;
+        sample.bodyRotateZ = mirror * -2.5 * strike * kPi / 180.0;
+        sample.rootOffsetForward = 0.025 * strike;
+        sample.rootOffsetY = 0.035 * load - 0.08 * strike;
         sample.punchStrength = strike;
-        sample.rearHandForward = 0.02 + 0.23 * strike;
-        sample.rearHandY = 0.15 * load - 0.45 * strike;
-        sample.rearHandDepth = 0.18 + 0.08 * strike;
+        sample.rearShoulderForwardOffset = -0.01 * load + 0.04 * strike;
+        sample.rearShoulderYOffset = 0.018 * load - 0.045 * strike;
+        sample.leadShoulderForwardOffset = -0.015 * strike;
+        sample.leadShoulderYOffset = 0.012 * strike;
+        // Chamber with a bent elbow below the torso, then drive the fist
+        // upward and slightly forward. The target never collapses onto the
+        // shoulder, so prepare and recovery do not resemble elbow strikes.
+        sample.rearHandForward = 0.32 - 0.03 * load + 0.09 * strike;
+        sample.rearHandY = -0.08 + 0.22 * load - 0.42 * strike;
+        sample.rearHandDepth = 0.10 + 0.05 * load + 0.08 * strike;
+        sample.rearArmBendForward = 0.28;
+        // Reuse the reviewed compact guard on the non-striking lead side.
+        sample.leadHandForward = 0.18;
+        sample.leadHandY = -0.01;
+        sample.leadHandDepth = 0.12;
+        sample.leadArmBendForward = 0.62;
         break;
     }
-    case ActionId::Hook:
-    case ActionId::SwingPunch: {
-        const bool swing = clip.id == ActionId::SwingPunch;
+    case ActionId::Hook: {
         const double coil = Segment(time, 0.0, clip.prepareEnd) * actionWeight;
         const double strike = HoldAndReturn(time, clip.prepareEnd, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
         const double curvedArc = std::sin(Clamp01(strike) * kPi * 0.5);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        const double arc = swing ? 0.48 : 0.31;
-        sample.bodyRotateY = mirror * ((swing ? -12.0 : -8.0) * coil + (swing ? 40.0 : 20.0) * strike) * kPi / 180.0;
-        sample.bodyRotateZ = mirror * (swing ? -8.0 : -4.0) * strike * kPi / 180.0;
-        sample.rootOffsetForward = (swing ? 0.09 : 0.035) * strike;
+        // A compact lead hook is carried by the lead shoulder around the body
+        // axis. It keeps a bent elbow and a short horizontal depth arc rather
+        // than extending like a straight punch.
+        sample.bodyRotateX = 3.0 * kPi / 180.0 * strike;
+        sample.bodyRotateY = mirror * (-8.0 * coil + 20.0 * strike) * kPi / 180.0;
+        sample.bodyRotateZ = mirror * -2.5 * strike * kPi / 180.0;
+        sample.rootOffsetForward = 0.025 * strike;
+        sample.rootOffsetY = 0.012 * strike;
         sample.punchStrength = strike;
-        sample.leadHandForward = (swing ? -0.18 : -0.08) * coil + (swing ? 0.36 : 0.27) * strike;
-        sample.leadHandY = -0.18 + (swing ? 0.08 : 0.02) * strike;
-        sample.leadHandDepth = 0.20 + arc * curvedArc;
+        sample.leadShoulderForwardOffset = 0.05 * strike;
+        sample.leadShoulderYOffset = -0.015 * strike;
+        sample.rearShoulderForwardOffset = -0.025 * strike;
+        sample.rearShoulderYOffset = 0.012 * strike;
+        sample.leadHandForward = 0.34 - 0.02 * coil + 0.06 * strike;
+        sample.leadHandY = -0.10;
+        sample.leadHandDepth = 0.10 + 0.28 * curvedArc;
+        sample.leadArmBendForward = 0.22;
+        sample.rearHandForward = 0.18;
+        sample.rearHandY = -0.01;
+        sample.rearHandDepth = 0.12;
+        sample.rearArmBendForward = 0.62;
+        break;
+    }
+    case ActionId::SwingPunch: {
+        const double coil = Segment(time, 0.0, clip.prepareEnd) * actionWeight;
+        const double strike = HoldAndReturn(time, clip.prepareEnd, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
+        const double curvedArc = std::sin(Clamp01(strike) * kPi * 0.5);
+        EnableHands(sample, handWeight);
+        SetGuardHands(sample);
+        // The exaggerated swing uses the same lead-side shoulder chain as the
+        // compact hook, but with a longer load, wider depth arc and larger
+        // torso turn. The fist remains a valid two-bone IK target throughout.
+        sample.bodyRotateX = 5.0 * kPi / 180.0 * strike;
+        sample.bodyRotateY = mirror * (-12.0 * coil + 40.0 * strike) * kPi / 180.0;
+        sample.bodyRotateZ = mirror * -7.0 * strike * kPi / 180.0;
+        sample.rootOffsetForward = 0.07 * strike;
+        sample.rootOffsetY = 0.025 * strike;
+        sample.punchStrength = strike;
+        sample.leadShoulderForwardOffset = 0.07 * strike;
+        sample.leadShoulderYOffset = -0.02 * strike;
+        sample.leadShoulderDepthOffset = 0.015 * strike;
+        sample.rearShoulderForwardOffset = -0.03 * strike;
+        sample.rearShoulderYOffset = 0.015 * strike;
+        sample.leadHandForward = 0.40 - 0.04 * coil - 0.06 * strike;
+        sample.leadHandY = -0.08;
+        sample.leadHandDepth = 0.10 - 0.06 * coil + 0.58 * curvedArc;
+        sample.leadArmBendForward = 0.12;
+        sample.rearHandForward = 0.18;
+        sample.rearHandY = -0.01;
+        sample.rearHandDepth = 0.12;
+        sample.rearArmBendForward = 0.61;
         break;
     }
     case ActionId::Layback: {
         const double lean = HoldAndReturn(time, 0.0, clip.activeEnd, clip.contactEnd, clip.recoverEnd);
+        EnableFeet(sample);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.bodyRotateZ = mirror * -19.0 * kPi / 180.0 * lean;
-        sample.bodyRotateX = -5.0 * kPi / 180.0 * lean;
-        sample.lowerBodyActionRotationWeight = 0.18;
-        sample.rootOffsetForward = -0.045 * lean;
-        sample.rootOffsetY = 0.025 * lean;
+        // Withdraw the shoulder line while keeping the actor root and feet
+        // nearly planted. Only a small fraction of the upper-body rotation is
+        // allowed into the lower-body projection.
+        sample.bodyRotateZ = mirror * -25.0 * kPi / 180.0 * lean;
+        sample.bodyRotateX = -7.0 * kPi / 180.0 * lean;
+        sample.lowerBodyActionRotationWeight = 0.04;
+        sample.rootOffsetForward = -0.015 * lean;
+        // Lower the hips into a shallow crouch while lifting both local foot
+        // targets by the same amount. After root translation the feet remain
+        // planted, and fixed-length IK bends both knees toward headingSign.
+        sample.rootOffsetY = 0.035 * lean;
+        sample.leadFootLift = 0.035 * lean;
+        sample.rearFootLift = 0.035 * lean;
+        sample.leadShoulderForwardOffset = -0.065 * lean;
+        sample.leadShoulderYOffset = -0.012 * lean;
+        sample.rearShoulderForwardOffset = -0.065 * lean;
+        sample.rearShoulderYOffset = -0.012 * lean;
+        sample.leadHandForward = 0.18;
+        sample.leadHandY = -0.01;
+        sample.leadHandDepth = 0.12;
+        sample.leadArmBendForward = 0.62;
+        sample.rearHandForward = 0.18;
+        sample.rearHandY = -0.01;
+        sample.rearHandDepth = 0.12;
+        sample.rearArmBendForward = 0.62;
         sample.dodgeStrength = lean;
         break;
     }

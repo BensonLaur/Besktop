@@ -121,6 +121,7 @@ $env:BESKTOP_DEBUG_ICON_PLANE='1'   # 显示图标薄片调试边框
 $env:BESKTOP_RENDER_SHADOWS='1'     # 显示开发期阴影效果
 $env:BESKTOP_MAX_ACTORS='10'        # 仅创建前 10 个演员；未设置或设为 0 时全部觉醒
 $env:BESKTOP_ACTION_PREVIEW='lead_straight' # 首演员原地循环预览动作
+$env:BESKTOP_ACTION_ORBIT_CAMERA='1' # 摄像头绕动作预览演员的身体中轴连续观察
 $env:BESKTOP_TURN_PREVIEW='1'       # 首演员原地循环预览连续 3D 转身
 ```
 
@@ -134,6 +135,8 @@ light_hit_react  heavy_stagger  whiff_recovery
 ```
 
 预览会等待首个演员完成觉醒和四肢生长，再暂停该演员的随机漫游并循环播放；推荐配合 `BESKTOP_MAX_ACTORS=1` 和 `BESKTOP_ANIMATION_SPEED=0.5` 观察。`BESKTOP_TURN_PREVIEW=1` 使用同一诊断约定循环展示左右连续转身；未设置预览时，现有全量觉醒与自由漫游行为不变。当前预览只验证单演员动作数据和姿态，不包含目标、命中、伤害或自动战斗。
+
+动作预览时可再设置 `BESKTOP_ACTION_ORBIT_CAMERA=1`：诊断摄像头会围绕角色身体中轴连续环绕，8 个动画秒完成一圈，用于从正面、侧面和背面检查薄片、挂点与固定骨长四肢。该观察变换不改变动作数据、逻辑朝向或漫游转身状态；在 `0.5x` 动画速度下，一圈约需 16 秒。
 
 普通 Release 构建会忽略上述单项变量，并固定使用 `1.0x` 动画速度和 `0` 秒偏移。需要现场诊断时，必须先显式设置总开关，再设置所需单项：
 

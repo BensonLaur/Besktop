@@ -17,6 +17,7 @@ struct RuntimeOptions {
     double animationOffsetSeconds = 0.0;
     ActionId actionPreview = ActionId::None;
     bool invalidActionPreview = false;
+    bool actionOrbitCameraEnabled = false;
     bool turnPreviewEnabled = false;
 };
 

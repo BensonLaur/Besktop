@@ -321,7 +321,19 @@ besktop::TwoBoneIkSolution SolveActionArm(
     const double forward = leadArm ? sample.leadHandForward : sample.rearHandForward;
     const double targetY = leadArm ? sample.leadHandY : sample.rearHandY;
     const double targetDepth = leadArm ? sample.leadHandDepth : sample.rearHandDepth;
-    const GaitVec3 shoulder{0.0, -planeSide * 0.10, depthSign * planeSide * 0.24};
+    const double bendForward = leadArm ?
+        sample.leadArmBendForward : sample.rearArmBendForward;
+    const double shoulderForward = leadArm ?
+        sample.leadShoulderForwardOffset : sample.rearShoulderForwardOffset;
+    const double shoulderY = leadArm ?
+        sample.leadShoulderYOffset : sample.rearShoulderYOffset;
+    const double shoulderDepth = leadArm ?
+        sample.leadShoulderDepthOffset : sample.rearShoulderDepthOffset;
+    const GaitVec3 shoulder{
+        heading * shoulderForward * planeSide,
+        (-0.10 + shoulderY) * planeSide,
+        depthSign * (0.24 + shoulderDepth) * planeSide,
+    };
     const GaitVec3 target{
         shoulder.x + heading * forward * planeSide,
         targetY * planeSide,
@@ -332,7 +344,28 @@ besktop::TwoBoneIkSolution SolveActionArm(
         target,
         planeSide * 0.30,
         planeSide * 0.32,
-        GaitVec3{0.0, 1.0, depthSign * 0.25});
+        GaitVec3{heading * bendForward, 1.0, depthSign * 0.25});
+}
+
+besktop::TurnProjectedPoint ProjectActionPoint(
+    const besktop::ActionSample& sample,
+    const besktop::GaitVec3& local,
+    double direction,
+    double planeSide)
+{
+    using namespace besktop;
+    const double heading = direction < 0.0 ? -1.0 : 1.0;
+    const double facingYaw = direction < 0.0 ? kPi : 0.0;
+    TurnProjectedPoint projected = ProjectTurnPointWithRotation(
+        local,
+        sample.bodyRotateX,
+        facingYaw + sample.bodyRotateY,
+        sample.bodyRotateZ,
+        std::max(520.0, planeSide * 12.0));
+    projected.x += heading * sample.rootOffsetForward * planeSide +
+        sample.rootOffsetLateral * planeSide;
+    projected.y += sample.rootOffsetY * planeSide;
+    return projected;
 }
 
 void TestActionMetadataAndDefenseWindows()
@@ -436,6 +469,7 @@ void TestPunchPoseMathematics()
     const ActionClip& leadClip = GetActionClip(ActionId::LeadStraight);
     const ActionSample leadPrepare = SampleAction(leadClip, leadClip.prepareEnd * 0.8, 1.0);
     const ActionSample leadContact = SampleAction(leadClip, 0.32, 1.0);
+    const ActionSample leadRecover = SampleAction(leadClip, 0.50, 1.0);
     const double leadPrepareReach = Distance(
         SolveActionArm(leadPrepare, true, 1.0, planeSide).root,
         SolveActionArm(leadPrepare, true, 1.0, planeSide).end);
@@ -444,32 +478,442 @@ void TestPunchPoseMathematics()
         SolveActionArm(leadContact, true, 1.0, planeSide).end);
     Check(leadContactReach > leadPrepareReach + planeSide * 0.25,
         "lead straight extends clearly from prepare to contact");
+    const double leadPrepareElbow = JointInteriorAngleDegrees(
+        SolveActionArm(leadPrepare, true, 1.0, planeSide));
+    const double leadContactElbow = JointInteriorAngleDegrees(
+        SolveActionArm(leadContact, true, 1.0, planeSide));
+    const double leadRecoverElbow = JointInteriorAngleDegrees(
+        SolveActionArm(leadRecover, true, 1.0, planeSide));
+    Check(leadPrepareElbow >= 65.0,
+        "lead straight prepare avoids an acute folded elbow");
+    Check(leadRecoverElbow >= 65.0,
+        "lead straight recover avoids an acute folded elbow");
+    Check(leadContactElbow > leadPrepareElbow + 35.0 &&
+        leadContactElbow > leadRecoverElbow + 25.0,
+        "lead straight contains one clear extension between guard poses");
+
+    const ActionSample leadContactLeft = SampleAction(leadClip, 0.32, -1.0);
+    const GaitVec3 neutralLeadRight{0.0, -planeSide * 0.10, planeSide * 0.24};
+    const GaitVec3 neutralRearRight{0.0, -planeSide * 0.10, -planeSide * 0.24};
+    const GaitVec3 drivenLeadRight{
+        leadContact.leadShoulderForwardOffset * planeSide,
+        (-0.10 + leadContact.leadShoulderYOffset) * planeSide,
+        (0.24 + leadContact.leadShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 drivenRearRight{
+        leadContact.rearShoulderForwardOffset * planeSide,
+        (-0.10 + leadContact.rearShoulderYOffset) * planeSide,
+        -(0.24 + leadContact.rearShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 neutralLeadLeft{0.0, -planeSide * 0.10, -planeSide * 0.24};
+    const GaitVec3 drivenLeadLeft{
+        leadContactLeft.leadShoulderForwardOffset * planeSide,
+        (-0.10 + leadContactLeft.leadShoulderYOffset) * planeSide,
+        -(0.24 + leadContactLeft.leadShoulderDepthOffset) * planeSide,
+    };
+    const TurnProjectedPoint neutralLeadRightProjected = ProjectActionPoint(
+        ActionSample{}, neutralLeadRight, 1.0, planeSide);
+    const TurnProjectedPoint neutralRearRightProjected = ProjectActionPoint(
+        ActionSample{}, neutralRearRight, 1.0, planeSide);
+    const TurnProjectedPoint drivenLeadRightProjected = ProjectActionPoint(
+        leadContact, drivenLeadRight, 1.0, planeSide);
+    const TurnProjectedPoint drivenRearRightProjected = ProjectActionPoint(
+        leadContact, drivenRearRight, 1.0, planeSide);
+    const TurnProjectedPoint neutralLeadLeftProjected = ProjectActionPoint(
+        ActionSample{}, neutralLeadLeft, -1.0, planeSide);
+    const TurnProjectedPoint drivenLeadLeftProjected = ProjectActionPoint(
+        leadContactLeft, drivenLeadLeft, -1.0, planeSide);
+    Check(drivenLeadRightProjected.x > neutralLeadRightProjected.x + planeSide * 0.08,
+        "lead straight advances the striking shoulder in screen space");
+    Check(drivenRearRightProjected.x < neutralRearRightProjected.x - planeSide * 0.01,
+        "lead straight retracts the guarding shoulder in screen space");
+    Check(drivenLeadRightProjected.y < drivenRearRightProjected.y - planeSide * 0.015,
+        "lead straight raises the striking shoulder and lowers the guarding shoulder");
+    Check(std::abs((drivenLeadRightProjected.x - neutralLeadRightProjected.x) +
+        (drivenLeadLeftProjected.x - neutralLeadLeftProjected.x)) < planeSide * 0.01,
+        "lead straight shoulder drive mirrors horizontally");
+    Check(std::abs(drivenLeadRightProjected.y - drivenLeadLeftProjected.y) < planeSide * 0.01,
+        "lead straight shoulder lift is symmetric across facing directions");
+
+    const TurnActorGeometry actorGeometry = BuildTurnActorGeometry(planeSide, planeSide);
+    const GaitVec3 iconCenter{-actorGeometry.bodyCenterOffset, 0.0, 0.0};
+    const TurnProjectedPoint neutralIconRight = ProjectActionPoint(
+        ActionSample{}, iconCenter, 1.0, planeSide);
+    const TurnProjectedPoint drivenIconRight = ProjectActionPoint(
+        leadContact, iconCenter, 1.0, planeSide);
+    const TurnProjectedPoint neutralIconLeft = ProjectActionPoint(
+        ActionSample{}, iconCenter, -1.0, planeSide);
+    const TurnProjectedPoint drivenIconLeft = ProjectActionPoint(
+        leadContactLeft, iconCenter, -1.0, planeSide);
+    Check(drivenIconRight.x > neutralIconRight.x + planeSide * 0.025,
+        "lead straight carries the icon torso forward with the shoulder drive");
+    Check(drivenIconRight.y > neutralIconRight.y + planeSide * 0.025,
+        "lead straight presses the icon torso slightly downward");
+    Check(std::abs((drivenIconRight.x - neutralIconRight.x) +
+        (drivenIconLeft.x - neutralIconLeft.x)) < planeSide * 0.01,
+        "lead straight torso drive mirrors horizontally");
+    Check(std::abs((drivenIconRight.y - neutralIconRight.y) -
+        (drivenIconLeft.y - neutralIconLeft.y)) < planeSide * 0.01,
+        "lead straight torso press matches across facing directions");
+
+    const TwoBoneIkSolution leadGuard = SolveActionArm(
+        leadContact, false, 1.0, planeSide);
+    Check(leadGuard.end.x > leadGuard.root.x + planeSide * 0.10,
+        "lead straight guard hand stays in front of the torso");
+    Check(leadGuard.end.y > leadGuard.root.y,
+        "lead straight guard hand stays below shoulder height");
+    Check(leadGuard.joint.y > leadGuard.root.y,
+        "lead straight guard elbow bends downward below the shoulder");
+    Check(leadGuard.joint.y < leadGuard.end.y + planeSide * 0.35,
+        "lead straight guard elbow remains compact around the hand");
+    const double guardUpperArmForwardDegrees = std::atan2(
+        leadGuard.joint.x - leadGuard.root.x,
+        leadGuard.joint.y - leadGuard.root.y) * 180.0 / kPi;
+    Check(guardUpperArmForwardDegrees >= 15.0 && guardUpperArmForwardDegrees <= 20.0,
+        "lead straight guard upper arm leans forward by 15 to 20 degrees");
 
     const ActionClip& rearClip = GetActionClip(ActionId::RearStraight);
+    const ActionSample rearPrepare = SampleAction(rearClip, rearClip.prepareEnd * 0.8, 1.0);
     const ActionSample rearContact = SampleAction(rearClip, 0.35, 1.0);
+    const ActionSample rearRecover = SampleAction(rearClip, 0.55, 1.0);
     Check(rearContact.rearHandForward > rearContact.leadHandForward + 0.35,
         "rear straight drives the rear hand target");
+    const TwoBoneIkSolution rearPrepareArm = SolveActionArm(
+        rearPrepare, false, 1.0, planeSide);
+    const TwoBoneIkSolution rearContactArm = SolveActionArm(
+        rearContact, false, 1.0, planeSide);
+    const TwoBoneIkSolution rearRecoverArm = SolveActionArm(
+        rearRecover, false, 1.0, planeSide);
+    const double rearPrepareReach = Distance(rearPrepareArm.root, rearPrepareArm.end);
+    const double rearContactReach = Distance(rearContactArm.root, rearContactArm.end);
+    const double rearPrepareElbow = JointInteriorAngleDegrees(rearPrepareArm);
+    const double rearContactElbow = JointInteriorAngleDegrees(rearContactArm);
+    const double rearRecoverElbow = JointInteriorAngleDegrees(rearRecoverArm);
+    Check(rearContactReach > rearPrepareReach + planeSide * 0.25,
+        "rear straight extends clearly from guard to contact");
+    Check(rearPrepareElbow >= 65.0 && rearRecoverElbow >= 65.0,
+        "rear straight guard and recovery avoid an acute elbow fold");
+    Check(rearContactElbow > rearPrepareElbow + 35.0 &&
+        rearContactElbow > rearRecoverElbow + 25.0,
+        "rear straight contains one clear extension between guard poses");
+
+    const TwoBoneIkSolution rearLeadGuard = SolveActionArm(
+        rearContact, true, 1.0, planeSide);
+    const double rearLeadGuardAngle = std::atan2(
+        rearLeadGuard.joint.x - rearLeadGuard.root.x,
+        rearLeadGuard.joint.y - rearLeadGuard.root.y) * 180.0 / kPi;
+    Check(rearLeadGuard.end.x > rearLeadGuard.root.x + planeSide * 0.10 &&
+        rearLeadGuard.end.y > rearLeadGuard.root.y &&
+        rearLeadGuard.joint.y > rearLeadGuard.root.y,
+        "rear straight keeps the lead hand in a compact forward guard");
+    Check(rearLeadGuardAngle >= 15.0 && rearLeadGuardAngle <= 20.0,
+        "rear straight lead guard upper arm leans forward by 15 to 20 degrees");
+
+    const ActionSample rearContactLeft = SampleAction(rearClip, 0.35, -1.0);
+    const GaitVec3 drivenRearShoulderRight{
+        rearContact.rearShoulderForwardOffset * planeSide,
+        (-0.10 + rearContact.rearShoulderYOffset) * planeSide,
+        -(0.24 + rearContact.rearShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 drivenLeadShoulderRight{
+        rearContact.leadShoulderForwardOffset * planeSide,
+        (-0.10 + rearContact.leadShoulderYOffset) * planeSide,
+        (0.24 + rearContact.leadShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 neutralRearLeft{0.0, -planeSide * 0.10, planeSide * 0.24};
+    const GaitVec3 drivenRearShoulderLeft{
+        rearContactLeft.rearShoulderForwardOffset * planeSide,
+        (-0.10 + rearContactLeft.rearShoulderYOffset) * planeSide,
+        (0.24 + rearContactLeft.rearShoulderDepthOffset) * planeSide,
+    };
+    const TurnProjectedPoint drivenRearShoulderRightProjected = ProjectActionPoint(
+        rearContact, drivenRearShoulderRight, 1.0, planeSide);
+    const TurnProjectedPoint drivenLeadShoulderRightProjected = ProjectActionPoint(
+        rearContact, drivenLeadShoulderRight, 1.0, planeSide);
+    const TurnProjectedPoint drivenRearShoulderLeftProjected = ProjectActionPoint(
+        rearContactLeft, drivenRearShoulderLeft, -1.0, planeSide);
+    const TurnProjectedPoint neutralRearLeftProjected = ProjectActionPoint(
+        ActionSample{}, neutralRearLeft, -1.0, planeSide);
+    Check(drivenRearShoulderRightProjected.x > neutralRearRightProjected.x + planeSide * 0.08,
+        "rear straight advances the striking rear shoulder in screen space");
+    Check(drivenLeadShoulderRightProjected.x < neutralLeadRightProjected.x - planeSide * 0.01,
+        "rear straight retracts the guarding lead shoulder in screen space");
+    Check(drivenRearShoulderRightProjected.y < drivenLeadShoulderRightProjected.y - planeSide * 0.015,
+        "rear straight raises the rear shoulder and lowers the lead shoulder");
+    Check(std::abs((drivenRearShoulderRightProjected.x - neutralRearRightProjected.x) +
+        (drivenRearShoulderLeftProjected.x - neutralRearLeftProjected.x)) < planeSide * 0.01,
+        "rear straight shoulder drive mirrors horizontally");
+
+    const TurnProjectedPoint rearIconRight = ProjectActionPoint(
+        rearContact, iconCenter, 1.0, planeSide);
+    const TurnProjectedPoint rearIconLeft = ProjectActionPoint(
+        rearContactLeft, iconCenter, -1.0, planeSide);
+    Check(rearIconRight.x > neutralIconRight.x + planeSide * 0.03,
+        "rear straight carries the icon torso forward");
+    Check(rearIconRight.y > neutralIconRight.y + planeSide * 0.025,
+        "rear straight presses the icon torso downward");
+    Check(std::abs((rearIconRight.x - neutralIconRight.x) +
+        (rearIconLeft.x - neutralIconLeft.x)) < planeSide * 0.01,
+        "rear straight torso drive mirrors horizontally");
+    Check(std::abs(rearContact.bodyRotateY) > std::abs(leadContact.bodyRotateY) + 0.05,
+        "rear straight uses more torso rotation than lead straight");
 
     const ActionClip& uppercutClip = GetActionClip(ActionId::Uppercut);
     const ActionSample uppercutPrepare = SampleAction(uppercutClip, 0.20, 1.0);
     const ActionSample uppercutContact = SampleAction(uppercutClip, 0.41, 1.0);
+    const ActionSample uppercutRecover = SampleAction(uppercutClip, 0.60, 1.0);
     Check(uppercutContact.rearHandY < uppercutPrepare.rearHandY - 0.35,
         "uppercut hand target rises from low to high");
+    const TwoBoneIkSolution uppercutPrepareArm = SolveActionArm(
+        uppercutPrepare, false, 1.0, planeSide);
+    const TwoBoneIkSolution uppercutContactArm = SolveActionArm(
+        uppercutContact, false, 1.0, planeSide);
+    const TwoBoneIkSolution uppercutRecoverArm = SolveActionArm(
+        uppercutRecover, false, 1.0, planeSide);
+    const double uppercutPrepareElbow = JointInteriorAngleDegrees(uppercutPrepareArm);
+    const double uppercutContactElbow = JointInteriorAngleDegrees(uppercutContactArm);
+    const double uppercutRecoverElbow = JointInteriorAngleDegrees(uppercutRecoverArm);
+    Check(uppercutPrepareElbow >= 65.0 && uppercutRecoverElbow >= 65.0,
+        "uppercut chamber and recovery avoid an acute elbow fold");
+    Check(uppercutContactElbow >= 70.0 && uppercutContactElbow <= 125.0,
+        "uppercut stays visibly bent while driving upward");
+    Check(uppercutContactArm.end.y < uppercutPrepareArm.end.y - planeSide * 0.30,
+        "uppercut fist travels clearly upward from the chamber");
 
-    const ActionSample hookContact = SampleAction(GetActionClip(ActionId::Hook), 0.37, 1.0);
-    const ActionSample swingContact = SampleAction(GetActionClip(ActionId::SwingPunch), 0.51, 1.0);
+    const TwoBoneIkSolution uppercutLeadGuard = SolveActionArm(
+        uppercutContact, true, 1.0, planeSide);
+    const double uppercutGuardAngle = std::atan2(
+        uppercutLeadGuard.joint.x - uppercutLeadGuard.root.x,
+        uppercutLeadGuard.joint.y - uppercutLeadGuard.root.y) * 180.0 / kPi;
+    Check(uppercutLeadGuard.end.x > uppercutLeadGuard.root.x + planeSide * 0.10 &&
+        uppercutLeadGuard.end.y > uppercutLeadGuard.root.y &&
+        uppercutLeadGuard.joint.y > uppercutLeadGuard.root.y,
+        "uppercut keeps the lead hand in a compact forward guard");
+    Check(uppercutGuardAngle >= 15.0 && uppercutGuardAngle <= 20.0,
+        "uppercut lead guard preserves the reviewed upper-arm angle");
+
+    const ActionSample uppercutContactLeft = SampleAction(uppercutClip, 0.41, -1.0);
+    const GaitVec3 uppercutRearShoulderRight{
+        uppercutContact.rearShoulderForwardOffset * planeSide,
+        (-0.10 + uppercutContact.rearShoulderYOffset) * planeSide,
+        -(0.24 + uppercutContact.rearShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 uppercutLeadShoulderRight{
+        uppercutContact.leadShoulderForwardOffset * planeSide,
+        (-0.10 + uppercutContact.leadShoulderYOffset) * planeSide,
+        (0.24 + uppercutContact.leadShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 uppercutRearShoulderLeft{
+        uppercutContactLeft.rearShoulderForwardOffset * planeSide,
+        (-0.10 + uppercutContactLeft.rearShoulderYOffset) * planeSide,
+        (0.24 + uppercutContactLeft.rearShoulderDepthOffset) * planeSide,
+    };
+    const TurnProjectedPoint uppercutRearShoulderRightProjected = ProjectActionPoint(
+        uppercutContact, uppercutRearShoulderRight, 1.0, planeSide);
+    const TurnProjectedPoint uppercutLeadShoulderRightProjected = ProjectActionPoint(
+        uppercutContact, uppercutLeadShoulderRight, 1.0, planeSide);
+    const TurnProjectedPoint uppercutRearShoulderLeftProjected = ProjectActionPoint(
+        uppercutContactLeft, uppercutRearShoulderLeft, -1.0, planeSide);
+    Check(uppercutRearShoulderRightProjected.x > neutralRearRightProjected.x + planeSide * 0.045,
+        "uppercut advances the striking rear shoulder");
+    Check(uppercutRearShoulderRightProjected.y < uppercutLeadShoulderRightProjected.y - planeSide * 0.02,
+        "uppercut lifts the striking rear shoulder above the guard shoulder");
+    Check(std::abs((uppercutRearShoulderRightProjected.x - neutralRearRightProjected.x) +
+        (uppercutRearShoulderLeftProjected.x - neutralRearLeftProjected.x)) < planeSide * 0.01,
+        "uppercut shoulder drive mirrors horizontally");
+
+    const TurnProjectedPoint uppercutIconRight = ProjectActionPoint(
+        uppercutContact, iconCenter, 1.0, planeSide);
+    const TurnProjectedPoint uppercutIconLeft = ProjectActionPoint(
+        uppercutContactLeft, iconCenter, -1.0, planeSide);
+    Check(uppercutIconRight.y < neutralIconRight.y - planeSide * 0.005,
+        "uppercut releases the icon torso upward from the loaded stance");
+    Check(std::abs((uppercutIconRight.x - neutralIconRight.x) +
+        (uppercutIconLeft.x - neutralIconLeft.x)) < planeSide * 0.01,
+        "uppercut torso motion mirrors horizontally");
+
+    const ActionClip& hookClip = GetActionClip(ActionId::Hook);
+    const ActionSample hookPrepare = SampleAction(hookClip, 0.16, 1.0);
+    const ActionSample hookContact = SampleAction(hookClip, 0.37, 1.0);
+    const ActionSample hookRecover = SampleAction(hookClip, 0.55, 1.0);
+    const ActionClip& swingClip = GetActionClip(ActionId::SwingPunch);
+    const ActionSample swingPrepare = SampleAction(swingClip, 0.23, 1.0);
+    const ActionSample swingContact = SampleAction(swingClip, 0.51, 1.0);
+    const ActionSample swingRecover = SampleAction(swingClip, 0.74, 1.0);
+    const double hookPrepareElbow = JointInteriorAngleDegrees(
+        SolveActionArm(hookPrepare, true, 1.0, planeSide));
     const double hookElbow = JointInteriorAngleDegrees(
         SolveActionArm(hookContact, true, 1.0, planeSide));
+    const double hookRecoverElbow = JointInteriorAngleDegrees(
+        SolveActionArm(hookRecover, true, 1.0, planeSide));
     const double swingElbow = JointInteriorAngleDegrees(
         SolveActionArm(swingContact, true, 1.0, planeSide));
-    Check(hookElbow < 145.0, "hook keeps a visibly bent elbow at contact");
+    const double swingPrepareElbow = JointInteriorAngleDegrees(
+        SolveActionArm(swingPrepare, true, 1.0, planeSide));
+    const double swingRecoverElbow = JointInteriorAngleDegrees(
+        SolveActionArm(swingRecover, true, 1.0, planeSide));
+    Check(hookPrepareElbow >= 65.0 && hookRecoverElbow >= 65.0,
+        "hook guard and recovery avoid an acute elbow fold");
+    Check(hookElbow >= 78.0 && hookElbow <= 110.0,
+        "hook keeps a near-right-angle elbow at contact");
+    Check(hookContact.leadHandDepth > hookPrepare.leadHandDepth + 0.20,
+        "hook fist travels through a clear horizontal depth arc");
+
+    const TwoBoneIkSolution hookRearGuard = SolveActionArm(
+        hookContact, false, 1.0, planeSide);
+    const double hookGuardAngle = std::atan2(
+        hookRearGuard.joint.x - hookRearGuard.root.x,
+        hookRearGuard.joint.y - hookRearGuard.root.y) * 180.0 / kPi;
+    Check(hookRearGuard.end.x > hookRearGuard.root.x + planeSide * 0.10 &&
+        hookRearGuard.end.y > hookRearGuard.root.y &&
+        hookRearGuard.joint.y > hookRearGuard.root.y,
+        "hook keeps the rear hand in a compact forward guard");
+    Check(hookGuardAngle >= 15.0 && hookGuardAngle <= 20.0,
+        "hook rear guard preserves the reviewed upper-arm angle");
+
+    const ActionSample hookContactLeft = SampleAction(hookClip, 0.37, -1.0);
+    const GaitVec3 hookLeadShoulderRight{
+        hookContact.leadShoulderForwardOffset * planeSide,
+        (-0.10 + hookContact.leadShoulderYOffset) * planeSide,
+        (0.24 + hookContact.leadShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 hookRearShoulderRight{
+        hookContact.rearShoulderForwardOffset * planeSide,
+        (-0.10 + hookContact.rearShoulderYOffset) * planeSide,
+        -(0.24 + hookContact.rearShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 hookLeadShoulderLeft{
+        hookContactLeft.leadShoulderForwardOffset * planeSide,
+        (-0.10 + hookContactLeft.leadShoulderYOffset) * planeSide,
+        -(0.24 + hookContactLeft.leadShoulderDepthOffset) * planeSide,
+    };
+    const TurnProjectedPoint hookLeadShoulderRightProjected = ProjectActionPoint(
+        hookContact, hookLeadShoulderRight, 1.0, planeSide);
+    const TurnProjectedPoint hookRearShoulderRightProjected = ProjectActionPoint(
+        hookContact, hookRearShoulderRight, 1.0, planeSide);
+    const TurnProjectedPoint hookLeadShoulderLeftProjected = ProjectActionPoint(
+        hookContactLeft, hookLeadShoulderLeft, -1.0, planeSide);
+    Check(hookLeadShoulderRightProjected.x > neutralLeadRightProjected.x + planeSide * 0.07,
+        "hook advances the striking lead shoulder");
+    Check(hookRearShoulderRightProjected.x < neutralRearRightProjected.x - planeSide * 0.01,
+        "hook retracts the guarding rear shoulder");
+    Check(std::abs((hookLeadShoulderRightProjected.x - neutralLeadRightProjected.x) +
+        (hookLeadShoulderLeftProjected.x - neutralLeadLeftProjected.x)) < planeSide * 0.01,
+        "hook shoulder drive mirrors horizontally");
+
+    const TurnProjectedPoint hookIconRight = ProjectActionPoint(
+        hookContact, iconCenter, 1.0, planeSide);
+    const TurnProjectedPoint hookIconLeft = ProjectActionPoint(
+        hookContactLeft, iconCenter, -1.0, planeSide);
+    Check(hookIconRight.x > neutralIconRight.x + planeSide * 0.02,
+        "hook carries the icon torso into the short arc");
+    Check(std::abs((hookIconRight.x - neutralIconRight.x) +
+        (hookIconLeft.x - neutralIconLeft.x)) < planeSide * 0.01,
+        "hook torso drive mirrors horizontally");
+
+    Check(swingPrepareElbow >= 65.0 && swingRecoverElbow >= 65.0,
+        "swing punch load and recovery avoid an acute elbow fold");
+    Check(swingElbow >= 85.0 && swingElbow <= 125.0,
+        "swing punch keeps a bent elbow through the wide contact arc");
+    Check(swingContact.leadHandDepth > swingPrepare.leadHandDepth + 0.45,
+        "swing punch sweeps through a distinctly wide depth arc");
+
+    const TwoBoneIkSolution swingRearGuard = SolveActionArm(
+        swingContact, false, 1.0, planeSide);
+    const double swingGuardAngle = std::atan2(
+        swingRearGuard.joint.x - swingRearGuard.root.x,
+        swingRearGuard.joint.y - swingRearGuard.root.y) * 180.0 / kPi;
+    Check(swingRearGuard.end.x > swingRearGuard.root.x + planeSide * 0.10 &&
+        swingRearGuard.end.y > swingRearGuard.root.y &&
+        swingRearGuard.joint.y > swingRearGuard.root.y,
+        "swing punch keeps the rear hand in a compact forward guard");
+    Check(swingGuardAngle >= 15.0 && swingGuardAngle <= 20.0,
+        "swing punch rear guard preserves the reviewed upper-arm angle");
+
+    const ActionSample swingContactLeft = SampleAction(swingClip, 0.51, -1.0);
+    const GaitVec3 swingLeadShoulderRight{
+        swingContact.leadShoulderForwardOffset * planeSide,
+        (-0.10 + swingContact.leadShoulderYOffset) * planeSide,
+        (0.24 + swingContact.leadShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 swingRearShoulderRight{
+        swingContact.rearShoulderForwardOffset * planeSide,
+        (-0.10 + swingContact.rearShoulderYOffset) * planeSide,
+        -(0.24 + swingContact.rearShoulderDepthOffset) * planeSide,
+    };
+    const GaitVec3 swingLeadShoulderLeft{
+        swingContactLeft.leadShoulderForwardOffset * planeSide,
+        (-0.10 + swingContactLeft.leadShoulderYOffset) * planeSide,
+        -(0.24 + swingContactLeft.leadShoulderDepthOffset) * planeSide,
+    };
+    const TurnProjectedPoint swingLeadShoulderRightProjected = ProjectActionPoint(
+        swingContact, swingLeadShoulderRight, 1.0, planeSide);
+    const TurnProjectedPoint swingRearShoulderRightProjected = ProjectActionPoint(
+        swingContact, swingRearShoulderRight, 1.0, planeSide);
+    const TurnProjectedPoint swingLeadShoulderLeftProjected = ProjectActionPoint(
+        swingContactLeft, swingLeadShoulderLeft, -1.0, planeSide);
+    Check(swingLeadShoulderRightProjected.x >
+        hookLeadShoulderRightProjected.x + planeSide * 0.035,
+        "swing punch drives the lead shoulder farther than compact hook");
+    Check(swingRearShoulderRightProjected.x < neutralRearRightProjected.x - planeSide * 0.015,
+        "swing punch retracts the guarding rear shoulder");
+    Check(std::abs((swingLeadShoulderRightProjected.x - neutralLeadRightProjected.x) +
+        (swingLeadShoulderLeftProjected.x - neutralLeadLeftProjected.x)) < planeSide * 0.01,
+        "swing punch shoulder drive mirrors horizontally");
+
+    const TurnProjectedPoint swingIconRight = ProjectActionPoint(
+        swingContact, iconCenter, 1.0, planeSide);
+    const TurnProjectedPoint swingIconLeft = ProjectActionPoint(
+        swingContactLeft, iconCenter, -1.0, planeSide);
+    Check(swingIconRight.x > hookIconRight.x + planeSide * 0.025,
+        "swing punch carries the icon torso farther than compact hook");
+    Check(std::abs((swingIconRight.x - neutralIconRight.x) +
+        (swingIconLeft.x - neutralIconLeft.x)) < planeSide * 0.01,
+        "swing punch torso drive mirrors horizontally");
+
     Check(swingContact.leadHandDepth - 0.20 > hookContact.leadHandDepth - 0.20 + 0.10,
         "swing punch uses a wider depth arc than hook");
     Check(std::abs(swingContact.bodyRotateY) > std::abs(hookContact.bodyRotateY) + 0.10,
         "swing punch rotates the body more than hook");
 
     std::cout << "punch metrics: lead reach=" << leadPrepareReach << "->" << leadContactReach
-              << ", hook/swing elbow=" << hookElbow << "/" << swingElbow
+              << ", lead elbow prepare/contact/recover=" << leadPrepareElbow << "/"
+              << leadContactElbow << "/" << leadRecoverElbow
+              << ", guard shoulder/elbow/hand y=" << leadGuard.root.y << "/"
+              << leadGuard.joint.y << "/" << leadGuard.end.y
+              << ", guard upper-arm forward=" << guardUpperArmForwardDegrees
+              << ", shoulder drive lead/rear="
+              << drivenLeadRightProjected.x - neutralLeadRightProjected.x << "/"
+              << drivenRearRightProjected.x - neutralRearRightProjected.x
+              << ", icon drive x/y=" << drivenIconRight.x - neutralIconRight.x << "/"
+              << drivenIconRight.y - neutralIconRight.y
+              << ", rear elbow prepare/contact/recover=" << rearPrepareElbow << "/"
+              << rearContactElbow << "/" << rearRecoverElbow
+              << ", rear guard upper-arm forward=" << rearLeadGuardAngle
+              << ", rear shoulder drive="
+              << drivenRearShoulderRightProjected.x - neutralRearRightProjected.x
+              << ", rear icon drive x/y=" << rearIconRight.x - neutralIconRight.x << "/"
+              << rearIconRight.y - neutralIconRight.y
+              << ", uppercut elbow prepare/contact/recover=" << uppercutPrepareElbow << "/"
+              << uppercutContactElbow << "/" << uppercutRecoverElbow
+              << ", uppercut guard=" << uppercutGuardAngle
+              << ", uppercut shoulder x/y="
+              << uppercutRearShoulderRightProjected.x - neutralRearRightProjected.x << "/"
+              << uppercutRearShoulderRightProjected.y - neutralRearRightProjected.y
+              << ", uppercut icon x/y=" << uppercutIconRight.x - neutralIconRight.x << "/"
+              << uppercutIconRight.y - neutralIconRight.y
+              << ", hook elbow prepare/contact/recover=" << hookPrepareElbow << "/"
+              << hookElbow << "/" << hookRecoverElbow
+              << ", hook guard=" << hookGuardAngle
+              << ", hook shoulder/icon x="
+              << hookLeadShoulderRightProjected.x - neutralLeadRightProjected.x << "/"
+              << hookIconRight.x - neutralIconRight.x
+              << ", swing elbow prepare/contact/recover=" << swingPrepareElbow << "/"
+              << swingElbow << "/" << swingRecoverElbow
+              << ", swing guard=" << swingGuardAngle
+              << ", swing shoulder/icon x="
+              << swingLeadShoulderRightProjected.x - neutralLeadRightProjected.x << "/"
+              << swingIconRight.x - neutralIconRight.x
               << ", hook/swing depth=" << hookContact.leadHandDepth << "/"
               << swingContact.leadHandDepth << '\n';
 }
@@ -563,6 +1007,138 @@ void TestKickPoseMathematics()
 void TestDefenseAndFeedbackMathematics()
 {
     using namespace besktop;
+    constexpr double planeSide = 48.0;
+    const ActionClip& laybackClip = GetActionClip(ActionId::Layback);
+    const ActionSample layback = SampleAction(laybackClip, 0.30, 1.0);
+    const ActionSample laybackLeft = SampleAction(laybackClip, 0.30, -1.0);
+    Check(std::abs(layback.bodyRotateZ) >= 24.0 * kPi / 180.0,
+        "layback creates a clearly readable upper-body lean");
+    Check(std::abs(layback.rootOffsetForward) <= 0.02 &&
+        layback.rootOffsetY >= 0.03 && layback.rootOffsetY <= 0.04,
+        "layback limits backward travel while lowering into a shallow crouch");
+    Check(layback.lowerBodyActionRotationWeight <= 0.05,
+        "layback isolates most upper-body rotation from the planted legs");
+
+    const TwoBoneIkSolution laybackLeadGuard = SolveActionArm(
+        layback, true, 1.0, planeSide);
+    const TwoBoneIkSolution laybackRearGuard = SolveActionArm(
+        layback, false, 1.0, planeSide);
+    const double laybackLeadGuardAngle = std::atan2(
+        laybackLeadGuard.joint.x - laybackLeadGuard.root.x,
+        laybackLeadGuard.joint.y - laybackLeadGuard.root.y) * 180.0 / kPi;
+    const double laybackRearGuardAngle = std::atan2(
+        laybackRearGuard.joint.x - laybackRearGuard.root.x,
+        laybackRearGuard.joint.y - laybackRearGuard.root.y) * 180.0 / kPi;
+    Check(laybackLeadGuard.end.y > laybackLeadGuard.root.y &&
+        laybackRearGuard.end.y > laybackRearGuard.root.y &&
+        laybackLeadGuard.joint.y > laybackLeadGuard.root.y &&
+        laybackRearGuard.joint.y > laybackRearGuard.root.y,
+        "layback keeps both guard elbows below the shoulder line");
+    Check(laybackLeadGuardAngle >= 15.0 && laybackLeadGuardAngle <= 20.5 &&
+        laybackRearGuardAngle >= 15.0 && laybackRearGuardAngle <= 20.5,
+        "layback keeps both upper arms in the reviewed guard range");
+
+    const GaitVec3 neutralShoulderCenter{0.0, -planeSide * 0.10, 0.0};
+    const GaitVec3 withdrawnShoulderCenter{
+        layback.leadShoulderForwardOffset * planeSide,
+        (-0.10 + layback.leadShoulderYOffset) * planeSide,
+        0.0,
+    };
+    const GaitVec3 withdrawnShoulderCenterLeft{
+        laybackLeft.leadShoulderForwardOffset * planeSide,
+        (-0.10 + laybackLeft.leadShoulderYOffset) * planeSide,
+        0.0,
+    };
+    const TurnProjectedPoint neutralShoulderRight = ProjectActionPoint(
+        ActionSample{}, neutralShoulderCenter, 1.0, planeSide);
+    const TurnProjectedPoint neutralShoulderLeft = ProjectActionPoint(
+        ActionSample{}, neutralShoulderCenter, -1.0, planeSide);
+    const TurnProjectedPoint withdrawnShoulderRight = ProjectActionPoint(
+        layback, withdrawnShoulderCenter, 1.0, planeSide);
+    const TurnProjectedPoint withdrawnShoulderLeft = ProjectActionPoint(
+        laybackLeft, withdrawnShoulderCenterLeft, -1.0, planeSide);
+    Check(withdrawnShoulderRight.x < neutralShoulderRight.x - planeSide * 0.11,
+        "layback withdraws the shoulder line behind the attack line");
+    Check(std::abs((withdrawnShoulderRight.x - neutralShoulderRight.x) +
+        (withdrawnShoulderLeft.x - neutralShoulderLeft.x)) < planeSide * 0.01,
+        "layback shoulder withdrawal mirrors horizontally");
+
+    const GaitGeometry laybackGeometry = BuildGaitGeometry(
+        planeSide, planeSide * 0.40, planeSide * 0.41);
+    const double hipY = planeSide * 0.5 + std::clamp(planeSide * 0.18, 12.0, 24.0);
+    double minimumLaybackKnee = 180.0;
+    double maximumLaybackKnee = 0.0;
+    for (const double side : {-1.0, 1.0}) {
+        const double depthSign = side;
+        const GaitVec3 hip{0.0, hipY, depthSign * planeSide * 0.22};
+        const GaitVec3 foot{
+            side * laybackGeometry.stride * 0.10,
+            hipY + laybackGeometry.legDrop - layback.leadFootLift * planeSide,
+            hip.z + depthSign * laybackGeometry.footDepth,
+        };
+        const TwoBoneIkSolution crouchedLeg = SolveTwoBoneIk(
+            hip,
+            foot,
+            planeSide * 0.40,
+            planeSide * 0.41,
+            GaitVec3{1.0, 0.0, depthSign * 0.18});
+        const double knee = JointInteriorAngleDegrees(crouchedLeg);
+        minimumLaybackKnee = std::min(minimumLaybackKnee, knee);
+        maximumLaybackKnee = std::max(maximumLaybackKnee, knee);
+        Check(crouchedLeg.joint.x > std::max(crouchedLeg.root.x, crouchedLeg.end.x),
+            "layback knee bends forward beyond the hip-foot line");
+
+        const GaitVec3 mirroredHip{0.0, hipY, -depthSign * planeSide * 0.22};
+        const GaitVec3 mirroredFoot{
+            -side * laybackGeometry.stride * 0.10,
+            foot.y,
+            mirroredHip.z - depthSign * laybackGeometry.footDepth,
+        };
+        const TwoBoneIkSolution mirroredLeg = SolveTwoBoneIk(
+            mirroredHip,
+            mirroredFoot,
+            planeSide * 0.40,
+            planeSide * 0.41,
+            GaitVec3{-1.0, 0.0, -depthSign * 0.18});
+        Check(mirroredLeg.joint.x < std::min(mirroredLeg.root.x, mirroredLeg.end.x),
+            "layback mirrored knee bends toward the mirrored facing");
+        Check(std::abs(JointInteriorAngleDegrees(mirroredLeg) - knee) < 1e-9,
+            "layback crouch keeps mirrored knee angles equal");
+    }
+    Check(minimumLaybackKnee >= 140.0 && maximumLaybackKnee <= 160.0,
+        "layback uses a shallow controlled crouch rather than a deep squat");
+
+    ActionSample lowerBodyLayback = layback;
+    lowerBodyLayback.bodyRotateX *= layback.lowerBodyActionRotationWeight;
+    lowerBodyLayback.bodyRotateY *= layback.lowerBodyActionRotationWeight;
+    lowerBodyLayback.bodyRotateZ *= layback.lowerBodyActionRotationWeight;
+    double maximumLaybackFootDrift = 0.0;
+    for (const double side : {-1.0, 1.0}) {
+        const GaitVec3 foot{
+            side * laybackGeometry.stride * 0.10,
+            hipY + laybackGeometry.legDrop - layback.leadFootLift * planeSide,
+            side * laybackGeometry.footDepth,
+        };
+        GaitVec3 neutralFootLocal = foot;
+        neutralFootLocal.y += layback.leadFootLift * planeSide;
+        const TurnProjectedPoint neutralFoot = ProjectActionPoint(
+            ActionSample{}, neutralFootLocal, 1.0, planeSide);
+        const TurnProjectedPoint movedFoot = ProjectActionPoint(
+            lowerBodyLayback, foot, 1.0, planeSide);
+        maximumLaybackFootDrift = std::max(maximumLaybackFootDrift, std::hypot(
+            movedFoot.x - neutralFoot.x,
+            movedFoot.y - neutralFoot.y));
+    }
+    Check(maximumLaybackFootDrift <= planeSide * 0.07,
+        "layback keeps projected foot drift within a small visual tolerance");
+
+    const ActionSample laybackComplete = SampleAction(
+        laybackClip, laybackClip.duration, 1.0);
+    Check(std::abs(laybackComplete.bodyRotateZ) < 1e-9 &&
+        std::abs(laybackComplete.rootOffsetForward) < 1e-9 &&
+        std::abs(laybackComplete.leadShoulderForwardOffset) < 1e-9,
+        "layback completes at the neutral pose");
+
     const ActionSample slipLeft = SampleAction(GetActionClip(ActionId::SlipLeft), 0.29, 1.0);
     const ActionSample slipRight = SampleAction(GetActionClip(ActionId::SlipRight), 0.29, 1.0);
     Check(std::abs(slipLeft.rootOffsetLateral + slipRight.rootOffsetLateral) < 1e-9 &&
@@ -595,6 +1171,13 @@ void TestDefenseAndFeedbackMathematics()
     const ActionSample whiff = SampleAction(whiffClip, 0.33, 1.0);
     Check(whiff.whiffRecoveryStrength > 0.5 && whiff.rootOffsetForward > 0.08,
         "whiff recovery exposes overextension channels");
+
+    std::cout << "defense metrics: layback shoulder x="
+              << withdrawnShoulderRight.x - neutralShoulderRight.x
+              << ", guard lead/rear=" << laybackLeadGuardAngle << "/"
+              << laybackRearGuardAngle
+              << ", knee=" << minimumLaybackKnee << ".." << maximumLaybackKnee
+              << ", max foot drift=" << maximumLaybackFootDrift << '\n';
 }
 
 void TestMirroringKeepsTimeline()
@@ -651,6 +1234,27 @@ void TestTurnMotionStateAndGeometry()
     const TurnActorGeometry geometry = BuildTurnActorGeometry(planeSide, planeSide);
     const double bodyCenterOffset = geometry.bodyCenterOffset;
     const double localIconCenterOffset = -bodyCenterOffset;
+
+    Check(std::abs(SampleObservationOrbitYaw(0.0)) < 1e-9,
+        "observation orbit starts at zero yaw");
+    Check(std::abs(SampleObservationOrbitYaw(2.0) - pi * 0.5) < 1e-9,
+        "observation orbit reaches 90 degrees at quarter cycle");
+    Check(std::abs(SampleObservationOrbitYaw(4.0) - pi) < 1e-9,
+        "observation orbit reaches 180 degrees at half cycle");
+    Check(std::abs(SampleObservationOrbitYaw(6.0) - pi * 1.5) < 1e-9,
+        "observation orbit reaches 270 degrees at three-quarter cycle");
+    Check(std::abs(SampleObservationOrbitYaw(8.0)) < 1e-9,
+        "observation orbit wraps after one full cycle");
+    Check(std::abs(SampleObservationOrbitYaw(2.0, -1.0)) < 1e-9,
+        "invalid observation orbit duration safely disables rotation");
+    const GaitVec3 orbitProbe{12.0, -4.0, 7.0};
+    for (const double time : {0.0, 2.0, 4.0, 6.0, 7.999}) {
+        const GaitVec3 rotatedProbe = RotateAroundVerticalAxis(
+            orbitProbe, SampleObservationOrbitYaw(time));
+        Check(std::abs(Distance(GaitVec3{}, rotatedProbe) -
+            Distance(GaitVec3{}, orbitProbe)) < 1e-9,
+            "observation orbit preserves local geometry lengths");
+    }
 
     Check(std::abs(geometry.limbWidth - 5.0) < 1e-9,
         "48px actor keeps the expected limb width");

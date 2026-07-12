@@ -57,6 +57,9 @@ void UpdateTurnMotion(TurnMotionState& state, double deltaSeconds);
 double SampleTurnYaw(const TurnMotionState& state);
 double SampleTurnEase(double progress);
 double BlendTurnLocomotion(double currentWeight, double targetWeight, double deltaSeconds);
+double SampleObservationOrbitYaw(
+    double elapsedSeconds,
+    double durationSeconds = 8.0);
 GaitVec3 RotateAroundVerticalAxis(const GaitVec3& local, double yaw);
 TurnProjectedPoint ProjectTurnPoint(
     const GaitVec3& local,

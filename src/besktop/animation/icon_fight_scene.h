@@ -44,6 +44,7 @@ public:
         double rotateX = 0.0;
         double rotateY = 0.0;
         double rotateZ = 0.0;
+        double observationOrbitYaw = 0.0;
         double facing = 1.0;
         double punch = 0.0;
         double kick = 0.0;
@@ -105,6 +106,8 @@ public:
         bool usedIconImageFallback = true;
         bool actionPreviewActor = false;
         double actionPreviewPauseRemaining = 0.45;
+        bool actionOrbitCameraEnabled = false;
+        double actionOrbitElapsedSeconds = 0.0;
         bool turnPreviewActor = false;
         double turnPreviewPauseRemaining = 0.65;
         ActionPlayer actionPlayer;
@@ -129,6 +132,7 @@ private:
     double previousElapsedSeconds_ = 0.0;
     ScenePhase phase_ = ScenePhase::Sleeping;
     ActionId previewAction_ = ActionId::None;
+    bool actionOrbitCameraEnabled_ = false;
     bool turnPreviewEnabled_ = false;
 };
 
