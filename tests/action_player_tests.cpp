@@ -1495,9 +1495,50 @@ void TestDefenseAndFeedbackMathematics()
     Check((whiffClip.recoverEnd - whiffClip.contactEnd) >
         (leadClip.recoverEnd - leadClip.contactEnd) + 0.15,
         "whiff recovery is longer than a compact punch recovery");
-    const ActionSample whiff = SampleAction(whiffClip, 0.33, 1.0);
-    Check(whiff.whiffRecoveryStrength > 0.5 && whiff.rootOffsetForward > 0.08,
+    const ActionSample whiff = SampleAction(whiffClip, 0.28, 1.0);
+    const ActionSample whiffLeft = SampleAction(whiffClip, 0.28, -1.0);
+    Check(whiff.whiffRecoveryStrength > 0.95 && whiff.rootOffsetForward > 0.16,
         "whiff recovery exposes overextension channels");
+    Check(std::abs(whiff.bodyRotateY) >= 31.5 * kPi / 180.0 &&
+        std::abs(whiff.bodyRotateZ) >= 14.5 * kPi / 180.0 &&
+        whiff.leadShoulderForwardOffset >= 0.095,
+        "whiff recovery visibly carries the shoulder and torso past the target line");
+    Check(whiff.leadHandForward >= 0.63 &&
+        whiff.leadHandForward > whiff.rearHandForward + 0.55 &&
+        whiff.leadHandDepth > whiff.rearHandDepth + 0.28,
+        "whiff recovery leaves the missed hand extended and the guard open");
+    Check(whiff.leadFootTargetEnabled && whiff.rearFootTargetEnabled &&
+        whiff.footTargetRootCompensationWeight > 0.99 &&
+        whiff.footTargetYawCompensationWeight > 0.99 &&
+        whiff.leadFootForwardOffset > 0.08,
+        "whiff recovery braces the forward lunge with planted foot targets");
+    const ActionSample whiffLag = SampleAction(whiffClip, 0.64, 1.0);
+    Check(whiffLag.leadHandForward > 0.40 &&
+        whiffLag.leadShoulderForwardOffset < 0.02,
+        "whiff recovery retracts the hips before the missed hand");
+    Check(std::abs(whiff.bodyRotateY + whiffLeft.bodyRotateY) < 1e-9 &&
+        std::abs(whiff.bodyRotateZ + whiffLeft.bodyRotateZ) < 1e-9 &&
+        std::abs(whiff.rootOffsetForward - whiffLeft.rootOffsetForward) < 1e-9,
+        "whiff recovery mirrors torso rotation while preserving lunge magnitude");
+    for (const double sampleTime : {0.18, 0.30, 0.56, 0.78, 0.90}) {
+        const ActionSample sample = SampleAction(whiffClip, sampleTime, 1.0);
+        for (const bool leadLeg : {false, true}) {
+            const TwoBoneIkSolution leg = SolveSideKickLeg(sample, leadLeg, 1.0, planeSide);
+            Check(std::abs(Distance(leg.root, leg.joint) - planeSide * 0.40) < 1e-6 &&
+                std::abs(Distance(leg.joint, leg.end) - planeSide * 0.41) < 1e-6,
+                "whiff recovery keeps both leg segment lengths fixed");
+        }
+    }
+    const ActionSample whiffLate = SampleAction(
+        whiffClip, whiffClip.duration - 1e-6, 1.0);
+    Check(std::abs(whiffLate.bodyRotateY) < 1e-6 &&
+        std::abs(whiffLate.rootOffsetForward) < 1e-6 &&
+        std::abs(whiffLate.leadFootForwardOffset) < 1e-6,
+        "whiff recovery blends back to neutral without committing root motion");
+    std::cout << "whiff metrics: yaw/lean/root/hand="
+              << std::abs(whiff.bodyRotateY) * 180.0 / kPi << "/"
+              << std::abs(whiff.bodyRotateZ) * 180.0 / kPi << "/"
+              << whiff.rootOffsetForward << "/" << whiff.leadHandForward << '\n';
 
     std::cout << "defense metrics: layback shoulder x="
               << withdrawnShoulderRight.x - neutralShoulderRight.x

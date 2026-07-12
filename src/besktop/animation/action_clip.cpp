@@ -762,18 +762,48 @@ ActionSample SampleAction(const ActionClip& clip, double localTimeSeconds, doubl
         break;
     }
     case ActionId::WhiffRecovery: {
-        const double overreach = HoldAndReturn(time, 0.0, clip.activeEnd, 0.58, clip.recoverEnd);
+        // Torso and striking arm recover on deliberately different curves:
+        // the hips start braking first, while the missed hand continues past
+        // the target line and remains exposed for a short punish window.
+        const double torsoOverreach = HoldAndReturn(time, 0.0, 0.18, 0.40, 0.72);
+        const double armOverreach = HoldAndReturn(time, 0.0, 0.22, 0.46, 0.82);
+        const double brace = HoldAndReturn(time, 0.08, 0.22, 0.54, 0.82);
+        const double leadStep = HoldAndReturn(time, 0.06, 0.20, 0.48, 0.82);
+        const double leadStepLift = HoldAndReturn(time, 0.06, 0.14, 0.20, 0.34);
+        const double settle = HoldAndReturn(time, 0.68, 0.78, 0.82, 0.94);
         EnableHands(sample, handWeight);
         SetGuardHands(sample);
-        sample.bodyRotateY = mirror * 23.0 * kPi / 180.0 * overreach;
-        sample.bodyRotateZ = mirror * 10.0 * kPi / 180.0 * overreach;
-        sample.rootOffsetForward = 0.15 * overreach;
-        sample.rootOffsetY = 0.025 * overreach;
-        sample.whiffRecoveryStrength = overreach;
-        sample.lowerBodyActionRotationWeight = 0.10;
-        sample.leadHandForward = 0.42 * overreach;
-        sample.leadHandY = -0.06 + 0.10 * overreach;
-        sample.leadHandDepth = 0.32;
+        EnableFeet(sample);
+        sample.footTargetYawCompensationWeight = 1.0;
+        sample.footTargetRootCompensationWeight = 1.0;
+        sample.bodyRotateX = 6.0 * kPi / 180.0 * torsoOverreach;
+        sample.bodyRotateY = mirror * ((32.0 * torsoOverreach) - (4.0 * settle)) * kPi / 180.0;
+        sample.bodyRotateZ = mirror * ((15.0 * torsoOverreach) - (2.5 * settle)) * kPi / 180.0;
+        sample.rootOffsetForward = 0.17 * torsoOverreach;
+        sample.rootOffsetY = 0.045 * brace;
+        sample.upperBodyOffsetForward = 0.065 * torsoOverreach;
+        sample.upperBodyOffsetY = 0.025 * torsoOverreach;
+        sample.whiffRecoveryStrength = std::max(torsoOverreach, armOverreach);
+        sample.lowerBodyActionRotationWeight = 0.22;
+        sample.leadFootForwardOffset = 0.09 * leadStep;
+        sample.leadFootLift = 0.04 * leadStepLift;
+        // Keep the missed hand beyond the target line after the hips have
+        // already begun to recover. The other hand also drops slightly for
+        // balance, leaving a readable but short-lived opening.
+        sample.leadHandForward = 0.30 + 0.34 * armOverreach;
+        sample.leadHandY = -0.10 + 0.15 * armOverreach;
+        sample.leadHandDepth = 0.16 + 0.24 * armOverreach;
+        sample.leadArmBendForward = 0.28;
+        sample.rearHandForward = 0.12 - 0.08 * torsoOverreach;
+        sample.rearHandY = -0.01 + 0.10 * torsoOverreach;
+        sample.rearHandDepth = 0.10;
+        sample.rearArmBendForward = 0.48;
+        sample.leadShoulderForwardOffset = 0.10 * torsoOverreach;
+        sample.leadShoulderYOffset = 0.035 * torsoOverreach;
+        sample.leadShoulderDepthOffset = 0.06 * torsoOverreach;
+        sample.rearShoulderForwardOffset = -0.04 * torsoOverreach;
+        sample.rearShoulderYOffset = -0.012 * torsoOverreach;
+        sample.rearShoulderDepthOffset = -0.035 * torsoOverreach;
         break;
     }
     default:
