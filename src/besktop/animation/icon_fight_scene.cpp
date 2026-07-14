@@ -1361,6 +1361,8 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     combatDirectorState_ = {};
     combatDirectorCandidates_.clear();
     combatDirectorSeparatingConfigured_ = false;
+    combatDirectorAvoidanceReplans_ = 0;
+    combatDirectorSpaceRejectsLogged_ = 0;
     loggedCombatPhase_ = CombatPairPhase::Inactive;
     previewAction_ = combatPreview_ == CombatScenarioId::None && !combatDirectorEnabled_ ?
         GetRuntimeOptions().actionPreview : ActionId::None;
@@ -1528,7 +1530,13 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
             combatDirectorEnabled_ = false;
             InitializeCombatDirector(combatDirectorState_, false, actors_.size());
         } else {
-            LogInfo(L"combat director preview enabled; maximum active pairs: 1");
+            const CombatDirectorTuning& tuning = GetCombatDirectorTuning();
+            LogInfo(
+                L"combat director preview enabled; maximum active pairs: 1; opening=" +
+                std::to_wstring(tuning.openingWanderSeconds) +
+                L"s; global cooldown=" + std::to_wstring(tuning.globalCooldownMinimumSeconds) +
+                L"-" + std::to_wstring(tuning.globalCooldownMaximumSeconds) +
+                L"s; actor cooldown=" + std::to_wstring(tuning.actorCooldownSeconds) + L"s");
         }
     }
     size_t boundActorCount = 0;
@@ -1661,6 +1669,40 @@ void IconFightScene::Update(double elapsedSeconds)
         }
         actor.turnPoseWeight = BlendTurnLocomotion(
             actor.turnPoseWeight, actor.turnMotion.turning ? 0.0 : 1.0, deltaSeconds);
+        actor.reservationAvoidanceCooldown = std::max(
+            0.0, actor.reservationAvoidanceCooldown - deltaSeconds);
+
+        if (combatDirectorEnabled_ && combatDirectorState_.reservation.active &&
+            !CombatDirectorOwnsActor(combatDirectorState_, static_cast<std::size_t>(&actor - actors_.data()))) {
+            const TurnActorGeometry avoidGeometry =
+                BuildTurnActorGeometry(actor.planeWidth, actor.planeHeight);
+            const double margin = std::max(28.0, avoidGeometry.maximumHorizontalExtent);
+            const CombatAvoidanceDecision avoidance = ComputeCombatAvoidanceTarget(
+                combatDirectorState_.reservation,
+                {
+                    static_cast<double>(wanderBounds_.left),
+                    static_cast<double>(wanderBounds_.top),
+                    static_cast<double>(wanderBounds_.right),
+                    static_cast<double>(wanderBounds_.bottom),
+                },
+                {
+                    static_cast<std::size_t>(&actor - actors_.data()),
+                    actor.x,
+                    actor.y,
+                    actor.targetX,
+                    actor.targetY,
+                    margin,
+                    actor.reservationAvoidanceCooldown,
+                });
+            if (avoidance.reselectTarget) {
+                actor.targetX = avoidance.targetX;
+                actor.targetY = avoidance.targetY;
+                actor.waitRemaining = 0.0;
+                actor.reservationAvoidanceCooldown =
+                    GetCombatDirectorTuning().avoidanceReplanIntervalSeconds;
+                ++combatDirectorAvoidanceReplans_;
+            }
+        }
 
         if (actor.actionPreviewActor) {
             actor.x = actor.baseX;
@@ -1822,8 +1864,14 @@ void IconFightScene::UpdateCombatPairActors(
     const CombatPairStep pairStep = UpdateCombatPair(
         combatPairState_, plan, readiness, actionDeltaSeconds);
 
+    bool directorHoldingResult = false;
     if (directorInteraction && combatPairState_.phase == CombatPairPhase::Returning &&
         !combatDirectorSeparatingConfigured_) {
+        directorHoldingResult = !AdvanceCombatDirectorResultHold(
+            combatDirectorState_, actionDeltaSeconds);
+    }
+    if (directorInteraction && combatPairState_.phase == CombatPairPhase::Returning &&
+        !combatDirectorSeparatingConfigured_ && !directorHoldingResult) {
         const double centerX = combatDirectorState_.reservation.centerX;
         const double radius = combatDirectorState_.reservation.radius;
         combatStationLeftX_ = std::clamp(
@@ -1873,7 +1921,7 @@ void IconFightScene::UpdateCombatPairActors(
     };
 
     if (combatPairState_.phase == CombatPairPhase::Approaching ||
-        combatPairState_.phase == CombatPairPhase::Returning) {
+        (combatPairState_.phase == CombatPairPhase::Returning && !directorHoldingResult)) {
         moveTo(attacker, combatStationLeftX_, combatStationY_);
         moveTo(defender, combatStationRightX_, combatStationY_);
     } else if (combatPairState_.phase == CombatPairPhase::Aligning) {
@@ -2091,6 +2139,9 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
     const CombatDirectorSelection selection = besktop::UpdateCombatDirector(
         combatDirectorState_, combatDirectorCandidates_, bounds, actionDeltaSeconds);
     if (selection.started) {
+        const std::size_t rejectedSinceLastRound =
+            combatDirectorState_.spaceRejectedTotal - combatDirectorSpaceRejectsLogged_;
+        combatDirectorSpaceRejectsLogged_ = combatDirectorState_.spaceRejectedTotal;
         IconActor& attacker = actors_[selection.attackerIndex];
         IconActor& defender = actors_[selection.defenderIndex];
         attacker.combatPreviewActor = true;
@@ -2109,8 +2160,16 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
             selection.reservation.centerX,
             selection.reservation.centerY);
         LogInfo(
-            L"combat director started interaction: " +
-            std::wstring(CombatScenarioIdName(selection.scenario)));
+            L"combat director round started: actors=" +
+            std::to_wstring(selection.attackerIndex) + L"," +
+            std::to_wstring(selection.defenderIndex) +
+            L"; scenario=" + std::wstring(CombatScenarioIdName(selection.scenario)) +
+            L"; eligible actors=" + std::to_wstring(selection.eligibleActorCount) +
+            L"; eligible pairs=" + std::to_wstring(selection.eligiblePairCount) +
+            L"; space rejected since last round=" + std::to_wstring(rejectedSinceLastRound) +
+            L"; reservation=" + std::to_wstring(selection.reservation.centerX) + L"," +
+            std::to_wstring(selection.reservation.centerY) + L" r=" +
+            std::to_wstring(selection.reservation.radius));
     }
 
     if (combatDirectorState_.phase != CombatDirectorPhase::Active) return;
@@ -2139,12 +2198,33 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
         actor.waitRemaining = 0.0;
     }
     CompleteCombatDirectorInteraction(combatDirectorState_);
+    const double cooldown = combatDirectorState_.globalCooldownRemaining;
     combatPairState_ = {};
     loggedCombatPhase_ = CombatPairPhase::Inactive;
     combatDirectorSeparatingConfigured_ = false;
-    ChooseWanderTarget(actors_[attackerIndex]);
-    ChooseWanderTarget(actors_[defenderIndex]);
-    LogInfo(L"combat director released pair to wandering");
+    ChooseWanderTargetAwayFrom(actors_[attackerIndex], actors_[defenderIndex].x, -1.0);
+    ChooseWanderTargetAwayFrom(actors_[defenderIndex], actors_[attackerIndex].x, 1.0);
+    LogInfo(
+        L"combat director round completed; reservation released; cooldown=" +
+        std::to_wstring(cooldown) +
+        L"s; avoidance replans=" + std::to_wstring(combatDirectorAvoidanceReplans_));
+    combatDirectorAvoidanceReplans_ = 0;
+}
+
+void IconFightScene::ChooseWanderTargetAwayFrom(IconActor& actor, double avoidX, double direction)
+{
+    ChooseWanderTarget(actor);
+    const TurnActorGeometry geometry = BuildTurnActorGeometry(actor.planeWidth, actor.planeHeight);
+    const double sideMargin = std::max(28.0, geometry.maximumHorizontalExtent + geometry.visibleMargin);
+    const double minimumSeparation = geometry.planeSide * 2.4;
+    const double desiredX = avoidX + direction * minimumSeparation;
+    if ((actor.targetX - avoidX) * direction < minimumSeparation) {
+        actor.targetX = std::clamp(
+            desiredX,
+            static_cast<double>(wanderBounds_.left) + sideMargin,
+            static_cast<double>(wanderBounds_.right) - sideMargin);
+    }
+    actor.waitRemaining = 0.0;
 }
 
 void IconFightScene::ChooseWanderTarget(IconActor& actor)

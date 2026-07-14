@@ -88,6 +88,7 @@ public:
         double targetY = 0.0;
         double walkSpeed = 80.0;
         double waitRemaining = 0.0;
+        double reservationAvoidanceCooldown = 0.0;
         double awakeningDelay = 0.0;
         double walkPhase = 0.0;
         double locomotionWeight = 0.0;
@@ -128,6 +129,7 @@ private:
     ScenePhase DeterminePhase(double elapsedSeconds) const;
     void LogPhase(ScenePhase phase);
     void ChooseWanderTarget(IconActor& actor);
+    void ChooseWanderTargetAwayFrom(IconActor& actor, double avoidX, double direction);
     void UpdateCombatPairActors(
         std::size_t attackerIndex,
         std::size_t defenderIndex,
@@ -164,6 +166,8 @@ private:
     double combatStationRightX_ = 0.0;
     double combatStationY_ = 0.0;
     bool combatDirectorSeparatingConfigured_ = false;
+    std::size_t combatDirectorAvoidanceReplans_ = 0;
+    std::size_t combatDirectorSpaceRejectsLogged_ = 0;
     CombatPairPhase loggedCombatPhase_ = CombatPairPhase::Inactive;
     bool actionOrbitCameraEnabled_ = false;
     bool turnPreviewEnabled_ = false;
