@@ -271,6 +271,31 @@ void TestRuntimeModeToggle()
         "rapid toggles do not leak reservation");
 }
 
+void TestCancelledInteractionReleasesReservation()
+{
+    using namespace besktop;
+    CombatDirectorState state;
+    InitializeCombatDirector(state, true, 2, 31u);
+    state.phase = CombatDirectorPhase::Active;
+    state.attackerIndex = 0;
+    state.defenderIndex = 1;
+    state.scenario = CombatScenarioId::LeadParry;
+    state.reservation = {true, 500.0, 400.0, 120.0};
+    CancelCombatDirectorInteraction(state);
+    Check(state.phase == CombatDirectorPhase::Idle && !state.reservation.active,
+        "cancelled encounter releases active reservation");
+    Check(state.actorParticipationCounts[0] == 0 && state.actorParticipationCounts[1] == 0,
+        "cancelled encounter does not create false participation history");
+
+    state.phase = CombatDirectorPhase::Active;
+    state.reservation = {true, 500.0, 400.0, 120.0};
+    state.desiredEnabled = false;
+    state.disableAfterActive = true;
+    CancelCombatDirectorInteraction(state);
+    Check(state.phase == CombatDirectorPhase::Disabled && !state.reservation.active,
+        "cancel honours deferred disable request");
+}
+
 } // namespace
 
 int main()
@@ -282,6 +307,7 @@ int main()
     TestScenarioRotationAndLargeDelta();
     TestParticipationSpreadsAcrossActors();
     TestRuntimeModeToggle();
+    TestCancelledInteractionReleasesReservation();
     if (failures != 0) return 1;
     std::cout << "besktop_combat_director_tests: all checks passed\n";
     return 0;

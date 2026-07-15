@@ -395,6 +395,11 @@ ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elap
     pose.rotateX += pose.action.bodyRotateX;
     pose.rotateY += pose.action.bodyRotateY;
     pose.rotateZ += pose.action.bodyRotateZ;
+    pose.x += pose.facing * actor.encounterPose.rootOffsetForward * planeSide;
+    pose.y += actor.encounterPose.rootOffsetY * planeSide;
+    pose.rotateX += actor.encounterPose.bodyRotateX;
+    pose.rotateY += actor.encounterPose.bodyRotateY;
+    pose.rotateZ += actor.encounterPose.bodyRotateZ;
     pose.punch = pose.action.punchStrength;
     pose.kick = pose.action.kickStrength;
     pose.dodge = pose.action.dodgeStrength;
@@ -1382,11 +1387,12 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     awakeningReadinessLogged_ = false;
     awakeningCompletionLogged_ = false;
     combatDirectorState_ = {};
+    encounterState_ = {};
     combatDirectorCandidates_.clear();
-    combatDirectorSeparatingConfigured_ = false;
     combatDirectorAvoidanceReplans_ = 0;
     combatDirectorSpaceRejectsLogged_ = 0;
     loggedCombatPhase_ = CombatPairPhase::Inactive;
+    loggedEncounterPhase_ = EncounterPhase::Inactive;
     previewAction_ = experienceMode == RuntimeExperienceMode::ActionPreview ?
         options.actionPreview : ActionId::None;
     actionOrbitCameraEnabled_ = options.actionOrbitCameraEnabled;
@@ -1921,31 +1927,9 @@ void IconFightScene::UpdateCombatPairActors(
         defender.actionPlayer.State().actionId == ActionId::None &&
         attacker.pendingCombatAction == ActionId::None &&
         defender.pendingCombatAction == ActionId::None;
-    readiness.returnedToStations = directorInteraction ?
-        (combatDirectorSeparatingConfigured_ && atStations) : atStations;
+    readiness.returnedToStations = !directorInteraction && atStations;
     const CombatPairStep pairStep = UpdateCombatPair(
         combatPairState_, plan, readiness, actionDeltaSeconds);
-
-    bool directorHoldingResult = false;
-    if (directorInteraction && combatPairState_.phase == CombatPairPhase::Returning &&
-        !combatDirectorSeparatingConfigured_) {
-        directorHoldingResult = !AdvanceCombatDirectorResultHold(
-            combatDirectorState_, actionDeltaSeconds);
-    }
-    if (directorInteraction && combatPairState_.phase == CombatPairPhase::Returning &&
-        !combatDirectorSeparatingConfigured_ && !directorHoldingResult) {
-        const double centerX = combatDirectorState_.reservation.centerX;
-        const double radius = combatDirectorState_.reservation.radius;
-        combatStationLeftX_ = std::clamp(
-            centerX - radius * 0.58,
-            static_cast<double>(wanderBounds_.left) + radius * 0.35,
-            static_cast<double>(wanderBounds_.right) - radius * 0.35);
-        combatStationRightX_ = std::clamp(
-            centerX + radius * 0.58,
-            static_cast<double>(wanderBounds_.left) + radius * 0.35,
-            static_cast<double>(wanderBounds_.right) - radius * 0.35);
-        combatDirectorSeparatingConfigured_ = true;
-    }
 
     const auto blendLocomotion = [deltaSeconds](IconActor& actor, double target) {
         actor.locomotionWeight = BlendTurnLocomotion(actor.locomotionWeight, target, deltaSeconds);
@@ -1982,11 +1966,11 @@ void IconFightScene::UpdateCombatPairActors(
         advanceGait(actor, step);
     };
 
-    if (combatPairState_.phase == CombatPairPhase::Approaching ||
-        (combatPairState_.phase == CombatPairPhase::Returning && !directorHoldingResult)) {
+    if (!directorInteraction && (combatPairState_.phase == CombatPairPhase::Approaching ||
+        combatPairState_.phase == CombatPairPhase::Returning)) {
         moveTo(attacker, combatStationLeftX_, combatStationY_);
         moveTo(defender, combatStationRightX_, combatStationY_);
-    } else if (combatPairState_.phase == CombatPairPhase::Aligning) {
+    } else if (!directorInteraction && combatPairState_.phase == CombatPairPhase::Aligning) {
         blendLocomotion(attacker, 0.0);
         blendLocomotion(defender, 0.0);
         if (attacker.locomotionWeight <= 0.02) {
@@ -2262,18 +2246,42 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
         defender.combatBlockedImpact = false;
         combatPairState_ = {};
         loggedCombatPhase_ = CombatPairPhase::Inactive;
-        combatDirectorSeparatingConfigured_ = false;
         ConfigureCombatStations(
             selection.attackerIndex,
             selection.defenderIndex,
             selection.scenario,
             selection.reservation.centerX,
             selection.reservation.centerY);
+        const double actorMargin = std::max({
+            28.0,
+            std::max(attacker.planeWidth, attacker.planeHeight) * 0.85,
+            std::max(defender.planeWidth, defender.planeHeight) * 0.85,
+        });
+        BeginEncounter(
+            encounterState_,
+            combatDirectorState_.randomState ^
+                static_cast<std::uint32_t>((selection.attackerIndex + 1) * 0x9E3779B9u) ^
+                static_cast<std::uint32_t>((selection.defenderIndex + 1) * 0x85EBCA6Bu),
+            {
+                selection.reservation.centerX,
+                selection.reservation.centerY,
+                selection.reservation.radius,
+            },
+            {
+                bounds.left,
+                bounds.top,
+                bounds.right,
+                bounds.bottom,
+            },
+            actorMargin);
+        loggedEncounterPhase_ = encounterState_.phase;
         LogInfo(
-            L"combat director round started: actors=" +
+            L"encounter started: actors=" +
             std::to_wstring(selection.attackerIndex) + L"," +
             std::to_wstring(selection.defenderIndex) +
             L"; scenario=" + std::wstring(CombatScenarioIdName(selection.scenario)) +
+            L"; intent=" + std::wstring(EncounterIntentName(encounterState_.intent)) +
+            L"; assess=" + std::to_wstring(encounterState_.assessDuration) + L"s" +
             L"; eligible actors=" + std::to_wstring(selection.eligibleActorCount) +
             L"; eligible pairs=" + std::to_wstring(selection.eligiblePairCount) +
             L"; space rejected since last round=" + std::to_wstring(rejectedSinceLastRound) +
@@ -2285,37 +2293,229 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
     if (combatDirectorState_.phase != CombatDirectorPhase::Active) return;
     const std::size_t attackerIndex = combatDirectorState_.attackerIndex;
     const std::size_t defenderIndex = combatDirectorState_.defenderIndex;
-    UpdateCombatPairActors(
-        attackerIndex,
-        defenderIndex,
-        combatDirectorState_.scenario,
-        true,
-        deltaSeconds,
+    const bool indicesValid = attackerIndex < actors_.size() && defenderIndex < actors_.size() &&
+        attackerIndex != defenderIndex;
+    if (!indicesValid) {
+        CancelEncounter(encounterState_);
+        for (const std::size_t index : {attackerIndex, defenderIndex}) {
+            if (index >= actors_.size()) continue;
+            IconActor& actor = actors_[index];
+            actor.combatPreviewActor = false;
+            actor.combatImpactVisible = false;
+            actor.combatBlockedImpact = false;
+            actor.actionPlayer.Stop();
+            actor.actionSample = {};
+            actor.encounterPose = {};
+            actor.pendingCombatAction = ActionId::None;
+            actor.combatBlendDuration = 0.0;
+            actor.waitRemaining = 0.0;
+            ChooseWanderTarget(actor);
+        }
+        CancelCombatDirectorInteraction(combatDirectorState_);
+        combatPairState_ = {};
+        encounterState_ = {};
+        LogWarning(L"encounter cancelled because controlled actors became invalid");
+        return;
+    }
+
+    IconActor& attacker = actors_[attackerIndex];
+    IconActor& defender = actors_[defenderIndex];
+    const auto isAwake = [this](const IconActor& actor) {
+        return elapsedSeconds_ - actor.awakeningStartSeconds >=
+            kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
+    };
+    const bool actorsValid = isAwake(attacker) && isAwake(defender) &&
+        std::isfinite(attacker.x) && std::isfinite(attacker.y) &&
+        std::isfinite(defender.x) && std::isfinite(defender.y);
+    const CombatReservation& reservation = combatDirectorState_.reservation;
+    const bool reservationSafe = reservation.active &&
+        reservation.centerX - reservation.radius >= bounds.left &&
+        reservation.centerX + reservation.radius <= bounds.right &&
+        reservation.centerY - reservation.radius >= bounds.top &&
+        reservation.centerY + reservation.radius <= bounds.bottom;
+    const auto distanceTo = [](const IconActor& actor, double x, double y) {
+        return std::hypot(x - actor.x, y - actor.y);
+    };
+    const bool atStations = distanceTo(attacker, combatStationLeftX_, combatStationY_) <= 1.5 &&
+        distanceTo(defender, combatStationRightX_, combatStationY_) <= 1.5;
+    const bool aligned = atStations && !attacker.turnMotion.turning && !defender.turnMotion.turning &&
+        attacker.turnMotion.currentFacing == TurnFacing::Right &&
+        defender.turnMotion.currentFacing == TurnFacing::Left;
+    const bool combatComplete = encounterState_.phase == EncounterPhase::Combat &&
+        combatPairState_.phase == CombatPairPhase::Returning &&
+        combatPairState_.result != CombatResult::None &&
+        attacker.actionPlayer.State().actionId == ActionId::None &&
+        defender.actionPlayer.State().actionId == ActionId::None &&
+        attacker.pendingCombatAction == ActionId::None &&
+        defender.pendingCombatAction == ActionId::None;
+    const bool separated = encounterState_.phase == EncounterPhase::Separating &&
+        distanceTo(attacker, encounterState_.aftermath.attackerExit.x,
+            encounterState_.aftermath.attackerExit.y) <= 1.5 &&
+        distanceTo(defender, encounterState_.aftermath.defenderExit.x,
+            encounterState_.aftermath.defenderExit.y) <= 1.5;
+    const EncounterStep encounterStep = UpdateEncounter(
+        encounterState_,
+        {
+            actorsValid,
+            reservationSafe,
+            atStations,
+            aligned,
+            combatComplete,
+            separated,
+            combatPairState_.result,
+        },
         actionDeltaSeconds);
 
-    if (combatPairState_.phase != CombatPairPhase::Paused) return;
-    for (const std::size_t index : {attackerIndex, defenderIndex}) {
-        IconActor& actor = actors_[index];
+    const auto clearControlledActor = [](IconActor& actor) {
         actor.combatPreviewActor = false;
         actor.combatImpactVisible = false;
         actor.combatBlockedImpact = false;
         actor.actionPlayer.Stop();
         actor.actionSample = {};
+        actor.encounterPose = {};
         actor.pendingCombatAction = ActionId::None;
         actor.combatBlendDuration = 0.0;
         actor.baseX = actor.x;
         actor.baseY = actor.y;
         actor.waitRemaining = 0.0;
+    };
+    if (encounterStep.cancelled) {
+        clearControlledActor(attacker);
+        clearControlledActor(defender);
+        CancelCombatDirectorInteraction(combatDirectorState_);
+        combatPairState_ = {};
+        encounterState_ = {};
+        loggedCombatPhase_ = CombatPairPhase::Inactive;
+        ChooseWanderTarget(attacker);
+        ChooseWanderTarget(defender);
+        LogWarning(L"encounter cancelled safely; reservation released");
+        return;
     }
+
+    attacker.encounterPose = SampleEncounterPose(encounterState_, EncounterActorRole::Attacker);
+    defender.encounterPose = SampleEncounterPose(encounterState_, EncounterActorRole::Defender);
+    const auto blendLocomotion = [deltaSeconds](IconActor& actor, double target) {
+        actor.locomotionWeight = BlendTurnLocomotion(actor.locomotionWeight, target, deltaSeconds);
+    };
+    const auto advanceGait = [](IconActor& actor, double distance) {
+        const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+        const GaitGeometry geometry = BuildGaitGeometry(planeSide, planeSide * 0.40, planeSide * 0.41);
+        actor.walkPhase = WrapGaitPhase(actor.walkPhase + distance / geometry.cycleTravel);
+    };
+    const auto moveTo = [&](IconActor& actor, double targetX, double targetY, bool slowDown, bool preserveFacing) {
+        const double dx = targetX - actor.x;
+        const double dy = targetY - actor.y;
+        const double distance = std::hypot(dx, dy);
+        if (distance <= 1.5) {
+            actor.x = targetX;
+            actor.y = targetY;
+            blendLocomotion(actor, 0.0);
+            return;
+        }
+        if (!preserveFacing) {
+            const TurnFacing desiredFacing = FacingFromDirection(dx);
+            if (actor.turnMotion.turning) {
+                blendLocomotion(actor, 0.0);
+                if (actor.locomotionWeight <= 0.02) UpdateTurnMotion(actor.turnMotion, actionDeltaSeconds);
+                return;
+            }
+            if (RequestTurn(actor.turnMotion, desiredFacing)) {
+                blendLocomotion(actor, 0.0);
+                return;
+            }
+        }
+        const double planeSide = std::max(24.0, std::max(actor.planeWidth, actor.planeHeight));
+        const double targetWeight = slowDown ?
+            std::clamp(distance / (planeSide * 1.8), 0.12, 1.0) : 1.0;
+        blendLocomotion(actor, targetWeight);
+        const double speedScale = preserveFacing ? 0.48 : (slowDown ? std::max(0.32, targetWeight) : 1.0);
+        const double step = std::min(distance, actor.walkSpeed * speedScale * deltaSeconds);
+        actor.x += dx / distance * step;
+        actor.y += dy / distance * step;
+        advanceGait(actor, step);
+    };
+    const auto faceEachOther = [&]() {
+        blendLocomotion(attacker, 0.0);
+        blendLocomotion(defender, 0.0);
+        if (attacker.locomotionWeight <= 0.02) {
+            if (!attacker.turnMotion.turning) RequestTurn(attacker.turnMotion, TurnFacing::Right);
+            UpdateTurnMotion(attacker.turnMotion, actionDeltaSeconds);
+        }
+        if (defender.locomotionWeight <= 0.02) {
+            if (!defender.turnMotion.turning) RequestTurn(defender.turnMotion, TurnFacing::Left);
+            UpdateTurnMotion(defender.turnMotion, actionDeltaSeconds);
+        }
+    };
+
+    switch (encounterState_.phase) {
+    case EncounterPhase::Approaching:
+        moveTo(attacker, combatStationLeftX_, combatStationY_, true, false);
+        moveTo(defender, combatStationRightX_, combatStationY_, true, false);
+        break;
+    case EncounterPhase::Facing:
+        faceEachOther();
+        break;
+    case EncounterPhase::Intent:
+        if (encounterState_.intent != EncounterIntent::Combat) {
+            moveTo(attacker, encounterState_.attackerIntentTarget.x,
+                encounterState_.attackerIntentTarget.y, true, true);
+            moveTo(defender, encounterState_.defenderIntentTarget.x,
+                encounterState_.defenderIntentTarget.y, true, true);
+        }
+        break;
+    case EncounterPhase::Combat:
+        if (encounterStep.requestCombatStart) {
+            combatPairState_ = {};
+            loggedCombatPhase_ = CombatPairPhase::Inactive;
+        }
+        UpdateCombatPairActors(
+            attackerIndex,
+            defenderIndex,
+            combatDirectorState_.scenario,
+            true,
+            deltaSeconds,
+            actionDeltaSeconds);
+        break;
+    case EncounterPhase::Separating:
+        if (EncounterActorMayDepart(encounterState_, EncounterActorRole::Attacker)) {
+            moveTo(attacker, encounterState_.aftermath.attackerExit.x,
+                encounterState_.aftermath.attackerExit.y, false, false);
+        } else {
+            blendLocomotion(attacker, 0.0);
+        }
+        if (EncounterActorMayDepart(encounterState_, EncounterActorRole::Defender)) {
+            moveTo(defender, encounterState_.aftermath.defenderExit.x,
+                encounterState_.aftermath.defenderExit.y, false, false);
+        } else {
+            blendLocomotion(defender, 0.0);
+        }
+        break;
+    default:
+        blendLocomotion(attacker, 0.0);
+        blendLocomotion(defender, 0.0);
+        break;
+    }
+
+    if (encounterState_.phase != loggedEncounterPhase_) {
+        loggedEncounterPhase_ = encounterState_.phase;
+        LogInfo(
+            L"encounter phase: " + std::wstring(EncounterPhaseName(loggedEncounterPhase_)) +
+            L"; intent=" + std::wstring(EncounterIntentName(encounterState_.intent)));
+    }
+    if (!encounterStep.completed) return;
+
+    clearControlledActor(attacker);
+    clearControlledActor(defender);
     CompleteCombatDirectorInteraction(combatDirectorState_);
     const double cooldown = combatDirectorState_.globalCooldownRemaining;
     combatPairState_ = {};
+    encounterState_ = {};
     loggedCombatPhase_ = CombatPairPhase::Inactive;
-    combatDirectorSeparatingConfigured_ = false;
-    ChooseWanderTargetAwayFrom(actors_[attackerIndex], actors_[defenderIndex].x, -1.0);
-    ChooseWanderTargetAwayFrom(actors_[defenderIndex], actors_[attackerIndex].x, 1.0);
+    loggedEncounterPhase_ = EncounterPhase::Inactive;
+    ChooseWanderTargetAwayFrom(attacker, defender.x, -1.0);
+    ChooseWanderTargetAwayFrom(defender, attacker.x, 1.0);
     LogInfo(
-        L"combat director round completed; reservation released; cooldown=" +
+        L"encounter completed; reservation released; cooldown=" +
         std::to_wstring(cooldown) +
         L"s; avoidance replans=" + std::to_wstring(combatDirectorAvoidanceReplans_));
     combatDirectorAvoidanceReplans_ = 0;

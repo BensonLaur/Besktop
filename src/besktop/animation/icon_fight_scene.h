@@ -12,6 +12,7 @@
 #include "besktop/animation/awakening_director.h"
 #include "besktop/animation/combat_pair.h"
 #include "besktop/animation/combat_director.h"
+#include "besktop/animation/encounter_director.h"
 #include "besktop/animation/turn_motion.h"
 #include "besktop/render/icon_image_cache.h"
 
@@ -120,6 +121,7 @@ public:
         bool combatBlockedImpact = false;
         ActionPlayer actionPlayer;
         ActionSample actionSample{};
+        EncounterPoseSample encounterPose{};
         ActionId pendingCombatAction = ActionId::None;
         ActionSample combatBlendFrom{};
         double combatBlendElapsed = 0.0;
@@ -168,16 +170,17 @@ private:
     bool awakeningReadinessLogged_ = false;
     bool awakeningCompletionLogged_ = false;
     CombatDirectorState combatDirectorState_{};
+    EncounterState encounterState_{};
     std::vector<CombatDirectorCandidate> combatDirectorCandidates_;
     bool combatDirectorEnabled_ = false;
     bool combatDirectorDiagnosticsEnabled_ = false;
     double combatStationLeftX_ = 0.0;
     double combatStationRightX_ = 0.0;
     double combatStationY_ = 0.0;
-    bool combatDirectorSeparatingConfigured_ = false;
     std::size_t combatDirectorAvoidanceReplans_ = 0;
     std::size_t combatDirectorSpaceRejectsLogged_ = 0;
     CombatPairPhase loggedCombatPhase_ = CombatPairPhase::Inactive;
+    EncounterPhase loggedEncounterPhase_ = EncounterPhase::Inactive;
     bool actionOrbitCameraEnabled_ = false;
     bool turnPreviewEnabled_ = false;
     std::wstring automaticInteractionToast_;

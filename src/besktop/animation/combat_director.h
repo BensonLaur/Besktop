@@ -130,6 +130,7 @@ CombatDirectorSelection UpdateCombatDirector(
     bool ecosystemReady = true);
 
 void CompleteCombatDirectorInteraction(CombatDirectorState& state);
+void CancelCombatDirectorInteraction(CombatDirectorState& state);
 CombatDirectorModeChange SetCombatDirectorEnabled(CombatDirectorState& state, bool enabled);
 CombatDirectorModeChange ToggleCombatDirectorEnabled(CombatDirectorState& state);
 bool AdvanceCombatDirectorResultHold(CombatDirectorState& state, double deltaSeconds);

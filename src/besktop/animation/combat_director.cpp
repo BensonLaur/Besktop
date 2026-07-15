@@ -232,6 +232,18 @@ void CompleteCombatDirectorInteraction(CombatDirectorState& state)
     state.disableAfterActive = false;
 }
 
+void CancelCombatDirectorInteraction(CombatDirectorState& state)
+{
+    if (state.phase != CombatDirectorPhase::Active) return;
+    state.reservation = {};
+    state.scenario = CombatScenarioId::None;
+    state.resultHoldRemaining = 0.0;
+    state.retryRemaining = GetCombatDirectorTuning().retryMinimumSeconds;
+    state.phase = state.desiredEnabled && !state.disableAfterActive ?
+        CombatDirectorPhase::Idle : CombatDirectorPhase::Disabled;
+    state.disableAfterActive = false;
+}
+
 CombatDirectorModeChange SetCombatDirectorEnabled(CombatDirectorState& state, bool enabled)
 {
     if (state.desiredEnabled == enabled) return CombatDirectorModeChange::NoChange;
