@@ -8,11 +8,42 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
         activeEncounterPool_, actionDeltaSeconds,
         IsFirstWaveEcosystemReady(awakeningDirectorState_, awakeningObservations_));
 
-    ecosystemPerceptionInputs_.clear();
-    ecosystemRuntimeSnapshots_.clear();
-    ecosystemIntentSnapshot_.clear();
-    encounterArbiterActors_.clear();
-    activeEncounterActorInputs_.clear();
+    eventReactionSnapshots_.clear();
+    for (const ActiveEncounter& active : activeEncounterPool_.encounters) {
+        if (active.released) continue;
+        const bool inCombat = active.encounter.phase == EncounterPhase::Combat &&
+            active.combatEpisode.phase != CombatEpisodePhase::Inactive;
+        const CombatPairState& pair = active.combatEpisode.pair;
+        const bool contactOccurred = inCombat && pair.contactConsumed &&
+            pair.result != CombatResult::None;
+        const std::size_t exchangeIndex = contactOccurred ?
+            (active.combatEpisode.phase == CombatEpisodePhase::ExchangeActive ?
+                active.combatEpisode.completedExchangeCount + 1 :
+                active.combatEpisode.completedExchangeCount) :
+            active.combatEpisode.completedExchangeCount;
+        const CombatResult result = contactOccurred ? pair.result :
+            (active.encounter.phase == EncounterPhase::Aftermath ||
+             active.encounter.phase == EncounterPhase::Separating ?
+                active.combatEpisode.finalResult : CombatResult::None);
+        const bool ending = active.encounter.phase == EncounterPhase::Separating ||
+            active.encounter.phase == EncounterPhase::Complete;
+        eventReactionSnapshots_.push_back({
+            active.id,
+            {active.reservation.centerX, active.reservation.centerY},
+            active.reservation,
+            active.encounter.phase,
+            inCombat,
+            exchangeIndex,
+            contactOccurred,
+            result,
+            ComputeEncounterEventSalience(
+                active.encounter.phase, inCombat, result, contactOccurred),
+            ending,
+            active.encounter.phase == EncounterPhase::Cancelled || active.abnormalRelease,
+        });
+    }
+
+    eventReactionInputs_.clear();
     for (std::size_t index = 0; index < actors_.size(); ++index) {
         IconActor& actor = actors_[index];
         UpdateActorRuntimeState(actor.runtimeState, actionDeltaSeconds);
@@ -20,6 +51,81 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
             kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
         const bool controlled = actor.combatPreviewActor ||
             ActiveEncounterPoolOwnsActor(activeEncounterPool_, index);
+        const bool actionActive = actor.actionPlayer.State().actionId != ActionId::None;
+        const bool recovering = actor.pendingCombatAction != ActionId::None ||
+            actor.combatBlendDuration > 0.0;
+        const bool wandering = awake && !actor.actionPreviewActor && !actor.turnPreviewActor &&
+            !actor.combatPreviewActor;
+        double velocityX = 0.0;
+        double velocityY = 0.0;
+        const double dx = actor.targetX - actor.x;
+        const double dy = actor.targetY - actor.y;
+        const double distance = std::hypot(dx, dy);
+        if (wandering && !actor.turnMotion.turning && !actionActive && !recovering &&
+            actor.waitRemaining <= 0.0 && distance > 1e-6) {
+            velocityX = dx / distance * actor.walkSpeed;
+            velocityY = dy / distance * actor.walkSpeed;
+        }
+        eventReactionInputs_.push_back({
+            index, actor.x, actor.y, velocityX, velocityY,
+            actor.turnMotion.currentFacing == TurnFacing::Right ? 1.0 : -1.0,
+            0.0, std::max(actor.planeWidth, actor.planeHeight),
+            actor.behaviorProfile.tendency,
+            actor.runtimeState.alertness,
+            actor.runtimeState.agitation,
+            awake, wandering, actor.turnMotion.turning, actionActive, recovering, controlled,
+        });
+    }
+    const std::vector<EncounterReservation> reactionReservations =
+        ActiveEncounterReservations(activeEncounterPool_);
+    eventReactionStats_ = UpdateActorEventReactions(
+        eventReactionInputs_, eventReactionStates_, eventReactionSteps_,
+        eventReactionSnapshots_, reactionReservations, encounterBounds,
+        activeEncounterPool_.desiredEnabled && !activeEncounterPool_.previewSuspended,
+        actionDeltaSeconds);
+    eventReactionUnsafeRejections_ +=
+        eventReactionStats_.unsafeObservationPointRejectionCount;
+    for (std::size_t index = 0; index < actors_.size(); ++index) {
+        IconActor& actor = actors_[index];
+        const ActorEventReactionState& reaction = eventReactionStates_[index];
+        const ActorEventReactionStep& reactionStep = eventReactionSteps_[index];
+        if (reactionStep.targetChanged && reaction.targetValid) {
+            actor.targetX = reaction.target.x;
+            actor.targetY = reaction.target.y;
+            actor.waitRemaining = 0.0;
+        }
+        if (reactionStep.changed && reaction.kind == ActorEventReactionKind::None) {
+            ChooseWanderTarget(actor);
+            actor.waitRemaining = 0.0;
+        }
+        if (!combatDirectorDiagnosticsEnabled_ || !reactionStep.changed) continue;
+        if (reactionStep.started) {
+            LogInfo(
+                L"actor event reaction started: actor=" + std::to_wstring(index) +
+                L"; encounter=" + std::to_wstring(reaction.encounterId) +
+                L"; type=" + std::wstring(ActorEventReactionKindName(reaction.kind)) +
+                L"; salience=" + std::to_wstring(reaction.intensity));
+        } else if (reactionStep.finished) {
+            LogInfo(
+                L"actor event reaction finished: actor=" + std::to_wstring(index) +
+                L"; encounter=" + std::to_wstring(reaction.encounterId) +
+                L"; reason=" + std::wstring(
+                    ActorEventReactionFinishReasonName(reactionStep.finishReason)));
+        }
+    }
+
+    ecosystemPerceptionInputs_.clear();
+    ecosystemRuntimeSnapshots_.clear();
+    ecosystemIntentSnapshot_.clear();
+    encounterArbiterActors_.clear();
+    activeEncounterActorInputs_.clear();
+    for (std::size_t index = 0; index < actors_.size(); ++index) {
+        IconActor& actor = actors_[index];
+        const bool awake = elapsedSeconds_ - actor.awakeningStartSeconds >=
+            kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
+        const bool controlled = actor.combatPreviewActor ||
+            ActiveEncounterPoolOwnsActor(activeEncounterPool_, index) ||
+            ActorEventReactionBlocksEncounter(eventReactionStates_[index]);
         const bool actionActive = actor.actionPlayer.State().actionId != ActionId::None;
         const bool recovering = actor.pendingCombatAction != ActionId::None ||
             actor.combatBlendDuration > 0.0;
@@ -455,6 +561,18 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
     }
 
     CleanupReleasedEncounters(activeEncounterPool_);
+    if (combatDirectorDiagnosticsEnabled_ &&
+        loggedActiveReactionCount_ != eventReactionStats_.activeCount) {
+        loggedActiveReactionCount_ = eventReactionStats_.activeCount;
+        LogInfo(
+            L"actor event reactions: active=" +
+            std::to_wstring(eventReactionStats_.activeCount) +
+            L"; glancing=" + std::to_wstring(eventReactionStats_.glancingCount) +
+            L"; observing=" + std::to_wstring(eventReactionStats_.observingCount) +
+            L"; avoiding=" + std::to_wstring(eventReactionStats_.avoidingCount) +
+            L"; unsafe observation rejected=" +
+            std::to_wstring(eventReactionUnsafeRejections_));
+    }
     if (loggedActiveEncounterCount_ != activeEncounterPool_.encounters.size()) {
         loggedActiveEncounterCount_ = activeEncounterPool_.encounters.size();
         LogInfo(L"active encounter pool: active=" +

@@ -1392,8 +1392,15 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     ecosystemRuntimeSnapshots_.clear();
     ecosystemIntentSnapshot_.clear();
     encounterArbiterActors_.clear();
+    eventReactionSnapshots_.clear();
+    eventReactionInputs_.clear();
+    eventReactionStates_.clear();
+    eventReactionSteps_.clear();
+    eventReactionStats_ = {};
+    eventReactionUnsafeRejections_ = 0;
     combatDirectorAvoidanceReplans_ = 0;
     loggedActiveEncounterCount_ = 0;
+    loggedActiveReactionCount_ = 0;
     loggedCombatPhase_ = CombatPairPhase::Inactive;
     previewAction_ = experienceMode == RuntimeExperienceMode::ActionPreview ?
         options.actionPreview : ActionId::None;
@@ -1555,6 +1562,13 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     ecosystemRuntimeSnapshots_.reserve(actors_.size());
     ecosystemIntentSnapshot_.reserve(actors_.size());
     encounterArbiterActors_.reserve(actors_.size());
+    eventReactionInputs_.reserve(actors_.size());
+    eventReactionStates_.resize(actors_.size());
+    eventReactionSteps_.resize(actors_.size());
+    for (std::size_t index = 0; index < actors_.size(); ++index) {
+        InitializeActorEventReactionState(
+            eventReactionStates_[index], actors_[index].randomState ^ 0x73A4D29Bu);
+    }
     poseCache_.resize(actors_.size());
     renderCache_->bodies.resize(actors_.size());
     renderCache_->limbs.resize(actors_.size());
@@ -1858,6 +1872,72 @@ void IconFightScene::Update(double elapsedSeconds)
                 }
             }
             continue;
+        }
+        const std::size_t actorIndex = static_cast<std::size_t>(&actor - actors_.data());
+        if (combatDirectorEnabled_ && actorIndex < eventReactionStates_.size()) {
+            const ActorEventReactionState& reaction = eventReactionStates_[actorIndex];
+            const auto advanceReactionMovement = [&](double targetX, double targetY, double speedScale) {
+                const double dx = targetX - actor.x;
+                const double dy = targetY - actor.y;
+                const double distance = std::hypot(dx, dy);
+                if (distance <= 1.5) {
+                    actor.x = targetX;
+                    actor.y = targetY;
+                    updateLocomotionWeight(0.0);
+                    return true;
+                }
+                if (actor.turnMotion.turning) {
+                    updateLocomotionWeight(0.0);
+                    if (actor.locomotionWeight <= 0.02) {
+                        UpdateTurnMotion(actor.turnMotion, actionDeltaSeconds);
+                    }
+                    return false;
+                }
+                if (RequestTurn(actor.turnMotion, FacingFromDirection(dx))) {
+                    updateLocomotionWeight(0.0);
+                    return false;
+                }
+                updateLocomotionWeight(1.0);
+                const double move = std::min(
+                    distance, actor.walkSpeed * speedScale * deltaSeconds);
+                actor.x += dx / distance * move;
+                actor.y += dy / distance * move;
+                const double planeSide = std::max(
+                    24.0, std::max(actor.planeWidth, actor.planeHeight));
+                const GaitGeometry geometry = BuildGaitGeometry(
+                    planeSide, planeSide * 0.40, planeSide * 0.41);
+                actor.walkPhase = WrapGaitPhase(
+                    actor.walkPhase + move / geometry.cycleTravel);
+                return false;
+            };
+            const auto faceReactionCenter = [&]() {
+                const double dx = reaction.eventCenter.x - actor.x;
+                updateLocomotionWeight(0.0);
+                if (actor.turnMotion.turning) {
+                    if (actor.locomotionWeight <= 0.02) {
+                        UpdateTurnMotion(actor.turnMotion, actionDeltaSeconds);
+                    }
+                } else if (std::abs(dx) > 1.0) {
+                    RequestTurn(actor.turnMotion, FacingFromDirection(dx));
+                }
+            };
+
+            if (reaction.kind == ActorEventReactionKind::Observing && reaction.targetValid) {
+                if (advanceReactionMovement(reaction.target.x, reaction.target.y, 0.82)) {
+                    faceReactionCenter();
+                }
+                continue;
+            }
+            if (reaction.kind == ActorEventReactionKind::Avoiding && reaction.targetValid) {
+                advanceReactionMovement(
+                    reaction.target.x, reaction.target.y,
+                    actor.behaviorProfile.tendency == ActorTendency::Timid ? 1.18 : 1.0);
+                continue;
+            }
+            if (reaction.kind == ActorEventReactionKind::Glancing && !reaction.keepMoving) {
+                faceReactionCenter();
+                continue;
+            }
         }
         if (actor.turnMotion.turning) {
             updateLocomotionWeight(0.0);

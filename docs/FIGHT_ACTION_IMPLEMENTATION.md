@@ -361,12 +361,19 @@ src/besktop/animation/active_encounter_pool.h/.cpp
 src/besktop/animation/actor_ecosystem.h/.cpp
   稳定倾向、临时状态、局部感知、短窗口意图和双向握手请求
 
+src/besktop/animation/actor_event_reaction.h/.cpp
+  只读事件快照、非参与演员的个体注意/观察/避让状态与安全观察点
+
 src/besktop/animation/encounter_arbiter.h/.cpp
   演员占用、工作区与 reservation 的确定性安全仲裁
 
 src/besktop/animation/icon_fight_scene.*
   演员生命周期、漫游、动作系统集成和渲染入口
 ```
+
+附近演员反应已作为阶段 G 的独立检查点完成：`ActiveEncounter / CombatEpisode` 只生成不含名称、路径或品牌语义的事件快照，不遍历和控制全体演员。每个非参与演员按距离、视野、倾向、警觉/兴奋和事件强度独立选择 `Glancing / Observing / Avoiding` 或无视；选择使用稳定种子和重选窗口，不逐帧抽签，也没有固定全局旁观人数。
+
+Curious 更常观察，Timid 对重击更容易避让，Calm 多数无视或短暂注意，Bold 可以在外圈更近观察，Energetic 可以边走边关注。观察点必须位于工作区和全部活动 reservation 外，并尽量保持在演员当前一侧，避免穿过交锋区域；无安全点时退化为短暂注意或忽略。反应演员在 `Recovering` 和个体冷却结束前不会进入新的相遇握手，同一 Contact 序号不会重复重启反应。按 `P` 后不再产生新反应，已有反应自然结束；固定诊断预览不生成产品旁观反应。
 
 关键姿态采样和 IK 数学可以先放在 `action_clip.cpp`，但不得依赖 Win32 窗口或桌面采集对象，便于后续增加纯逻辑测试。
 

@@ -44,6 +44,7 @@ add_library(besktop_animation STATIC
     src/besktop/animation/action_clip.cpp
     src/besktop/animation/action_player.cpp
     src/besktop/animation/actor_ecosystem.cpp
+    src/besktop/animation/actor_event_reaction.cpp
     src/besktop/animation/awakening_director.cpp
     src/besktop/animation/combat_episode.cpp
     src/besktop/animation/combat_pair.cpp
@@ -143,6 +144,11 @@ add_executable(besktop_active_encounter_pool_tests
 )
 target_link_libraries(besktop_active_encounter_pool_tests PRIVATE besktop_animation)
 
+add_executable(besktop_actor_event_reaction_tests
+    tests/actor_event_reaction_tests.cpp
+)
+target_link_libraries(besktop_actor_event_reaction_tests PRIVATE besktop_animation)
+
 enable_testing()
 add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 add_test(NAME besktop_combat_tests COMMAND besktop_combat_tests)
@@ -153,6 +159,7 @@ add_test(NAME besktop_awakening_tests COMMAND besktop_awakening_tests)
 add_test(NAME besktop_encounter_tests COMMAND besktop_encounter_tests)
 add_test(NAME besktop_ecosystem_tests COMMAND besktop_ecosystem_tests)
 add_test(NAME besktop_active_encounter_pool_tests COMMAND besktop_active_encounter_pool_tests)
+add_test(NAME besktop_actor_event_reaction_tests COMMAND besktop_actor_event_reaction_tests)
 
 # Some localized MSVC + NMake environments do not produce usable /showIncludes
 # dependency files. Keep project headers as explicit object dependencies so an
@@ -175,7 +182,8 @@ if(MSVC AND CMAKE_GENERATOR STREQUAL "NMake Makefiles")
             besktop_awakening_tests
             besktop_encounter_tests
             besktop_ecosystem_tests
-            besktop_active_encounter_pool_tests)
+            besktop_active_encounter_pool_tests
+            besktop_actor_event_reaction_tests)
         get_target_property(target_sources ${target_name} SOURCES)
         foreach(source_file IN LISTS target_sources)
             if(source_file MATCHES "\\.(cc|cpp|cxx)$")
@@ -221,5 +229,7 @@ if(MSVC)
     set_property(TARGET besktop_ecosystem_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_active_encounter_pool_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_actor_event_reaction_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()

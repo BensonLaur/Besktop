@@ -10,6 +10,7 @@
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/animation/action_player.h"
 #include "besktop/animation/active_encounter_pool.h"
+#include "besktop/animation/actor_event_reaction.h"
 #include "besktop/animation/actor_ecosystem.h"
 #include "besktop/animation/awakening_director.h"
 #include "besktop/animation/combat_pair.h"
@@ -187,6 +188,12 @@ private:
     std::vector<ActorRuntimeState> ecosystemRuntimeSnapshots_;
     std::vector<LocalIntent> ecosystemIntentSnapshot_;
     std::vector<EncounterArbiterActor> encounterArbiterActors_;
+    std::vector<EncounterEventSnapshot> eventReactionSnapshots_;
+    std::vector<ActorEventReactionInput> eventReactionInputs_;
+    std::vector<ActorEventReactionState> eventReactionStates_;
+    std::vector<ActorEventReactionStep> eventReactionSteps_;
+    ActorEventReactionBatchStats eventReactionStats_{};
+    std::size_t eventReactionUnsafeRejections_ = 0;
     bool combatDirectorEnabled_ = false;
     bool combatDirectorDiagnosticsEnabled_ = false;
     double combatStationLeftX_ = 0.0;
@@ -194,6 +201,7 @@ private:
     double combatStationY_ = 0.0;
     std::size_t combatDirectorAvoidanceReplans_ = 0;
     std::size_t loggedActiveEncounterCount_ = 0;
+    std::size_t loggedActiveReactionCount_ = 0;
     CombatPairPhase loggedCombatPhase_ = CombatPairPhase::Inactive;
     bool actionOrbitCameraEnabled_ = false;
     bool turnPreviewEnabled_ = false;
