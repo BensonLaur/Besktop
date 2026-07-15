@@ -140,6 +140,35 @@ add_test(NAME besktop_awakening_tests COMMAND besktop_awakening_tests)
 add_test(NAME besktop_encounter_tests COMMAND besktop_encounter_tests)
 add_test(NAME besktop_ecosystem_tests COMMAND besktop_ecosystem_tests)
 
+# Some localized MSVC + NMake environments do not produce usable /showIncludes
+# dependency files. Keep project headers as explicit object dependencies so an
+# incremental build cannot link translation units compiled against different
+# class layouts.
+if(MSVC AND CMAKE_GENERATOR STREQUAL "NMake Makefiles")
+    file(GLOB_RECURSE BESKTOP_CORE_HEADERS CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
+    foreach(target_name IN ITEMS
+            besktop_runtime
+            besktop_animation
+            besktop
+            besktop_mvp_cli
+            besktop_action_tests
+            besktop_combat_tests
+            besktop_combat_director_tests
+            besktop_runtime_options_tests
+            besktop_awakening_tests
+            besktop_encounter_tests
+            besktop_ecosystem_tests)
+        get_target_property(target_sources ${target_name} SOURCES)
+        foreach(source_file IN LISTS target_sources)
+            if(source_file MATCHES "\\.(cc|cpp|cxx)$")
+                set_property(SOURCE "${source_file}" APPEND PROPERTY
+                    OBJECT_DEPENDS "${BESKTOP_CORE_HEADERS}")
+            endif()
+        endforeach()
+    endforeach()
+endif()
+
 foreach(target_name IN ITEMS besktop besktop_mvp_cli)
     target_link_libraries(${target_name} PRIVATE besktop_runtime)
 
