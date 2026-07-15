@@ -15,7 +15,6 @@
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr double kAwakeningStartSeconds = 0.30;
 constexpr double kAwakeningDurationSeconds = 0.48;
 constexpr double kLimbGrowthDurationSeconds = 0.72;
 constexpr ULONGLONG kAutomaticInteractionToastMilliseconds = 1600;
@@ -337,7 +336,7 @@ ActorPose BuildLegacyPose(const besktop::IconFightScene::IconActor& actor, doubl
 
 ActorPose BuildPose(const besktop::IconFightScene::IconActor& actor, double elapsedSeconds)
 {
-    const double actorTime = std::max(0.0, elapsedSeconds - actor.awakeningDelay - kAwakeningStartSeconds);
+    const double actorTime = std::max(0.0, elapsedSeconds - actor.awakeningStartSeconds);
     const bool wandering = actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
 
     ActorPose pose;
@@ -1375,6 +1374,11 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     combatDirectorDiagnosticsEnabled_ = combatDirectorEnabled_ &&
         options.combatDirectorDiagnosticsEnabled;
     combatPairState_ = {};
+    awakeningDirectorState_ = {};
+    awakeningInputs_.clear();
+    awakeningObservations_.clear();
+    awakeningReadinessLogged_ = false;
+    awakeningCompletionLogged_ = false;
     combatDirectorState_ = {};
     combatDirectorCandidates_.clear();
     combatDirectorSeparatingConfigured_ = false;
@@ -1439,7 +1443,6 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     const size_t count = configuredMaxActors > 0 ?
         std::min(availableCount, static_cast<size_t>(configuredMaxActors)) :
         availableCount;
-    const double staggerStep = count > 1 ? std::clamp(2.4 / static_cast<double>(count - 1), 0.05, 0.12) : 0.0;
     for (size_t index = 0; index < count; ++index) {
         const DesktopIconSnapshot& icon = snapshot.icons[index];
         const bool hasIconBounds = icon.iconBounds.right > icon.iconBounds.left &&
@@ -1480,8 +1483,6 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.usedPlaneFallback = !hasImageListSize || snapshot.iconDisplay.usedFallback;
         actor.planeSizeSource = planeSizeSource;
         actor.role = static_cast<int>(index);
-        const double jitter = static_cast<double>(actor.randomState % 41u) / 1000.0;
-        actor.awakeningDelay = static_cast<double>(index) * staggerStep + jitter;
         actor.walkSpeed = 58.0 + static_cast<double>((actor.randomState >> 8) % 49u);
         InitializeTurnMotion(actor.turnMotion, initialFacing);
         actor.walkPhase = std::fmod(static_cast<double>(actor.role) * 0.17, 1.0);
@@ -1495,6 +1496,32 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.actionPreviewActor = index == 0 && previewAction_ != ActionId::None && !actor.turnPreviewActor;
         actor.actionOrbitCameraEnabled = actor.actionPreviewActor && actionOrbitCameraEnabled_;
         actors_.push_back(actor);
+    }
+
+    awakeningInputs_.reserve(actors_.size());
+    for (std::size_t index = 0; index < actors_.size(); ++index) {
+        const IconActor& actor = actors_[index];
+        awakeningInputs_.push_back({
+            index,
+            actor.baseX,
+            actor.baseY,
+            std::max(actor.planeWidth, actor.planeHeight),
+            actor.randomState ^ 0xA511E9B3u,
+        });
+    }
+    InitializeAwakeningDirector(
+        awakeningDirectorState_,
+        awakeningInputs_,
+        {
+            static_cast<double>(wanderBounds_.left),
+            static_cast<double>(wanderBounds_.top),
+            static_cast<double>(wanderBounds_.right),
+            static_cast<double>(wanderBounds_.bottom),
+        });
+    awakeningObservations_.resize(actors_.size());
+    for (std::size_t index = 0; index < actors_.size(); ++index) {
+        actors_[index].awakeningStartSeconds =
+            GetActorAwakeningStartSeconds(awakeningDirectorState_, index);
     }
 
     for (IconActor& actor : actors_) {
@@ -1518,6 +1545,18 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     }
 
     LogInfo(L"icon fight scene reset; actors: " + std::to_wstring(actors_.size()));
+    const AwakeningPlanSummary& awakeningSummary = awakeningDirectorState_.summary;
+    LogInfo(
+        L"awakening waves: total=" + std::to_wstring(awakeningSummary.totalCount) +
+        L"; first=" + std::to_wstring(awakeningSummary.firstWaveCount) +
+        L" (" + std::to_wstring(awakeningSummary.firstStartMinimum) + L"-" +
+        std::to_wstring(awakeningSummary.firstStartMaximum) + L"s); second=" +
+        std::to_wstring(awakeningSummary.secondWaveCount) + L" (" +
+        std::to_wstring(awakeningSummary.secondStartMinimum) + L"-" +
+        std::to_wstring(awakeningSummary.secondStartMaximum) + L"s); fallback=" +
+        std::to_wstring(awakeningSummary.fallbackWaveCount) + L" (" +
+        std::to_wstring(awakeningSummary.fallbackStartMinimum) + L"-" +
+        std::to_wstring(awakeningSummary.fallbackStartMaximum) + L"s)");
     LogInfo(L"icon fight desktop label font: " + DesktopIconLabelFontDescription());
     LogInfo(L"icon fight limb model: distance-driven gait; stance=0.62, locomotion blend; fixed-length 3D two-bone IK; upperArm=0.30 planeSide, forearm=0.32, thigh=0.40, shin=0.41; stride=0.68 planeSide, stepHeight=0.14 planeSide, legDrop=0.994 totalLegLength");
     LogInfo(L"icon fight body model: double-sided icon plane; back face keeps non-mirrored icon UV order");
@@ -1667,6 +1706,7 @@ void IconFightScene::Update(double elapsedSeconds)
     const double actionDeltaSeconds = std::clamp(unboundedDeltaSeconds, 0.0, 1.0);
     previousElapsedSeconds_ = elapsedSeconds;
     elapsedSeconds_ = elapsedSeconds;
+    UpdateAwakeningSchedule();
     if (combatPreview_ != CombatScenarioId::None && actors_.size() >= 2) {
         UpdateCombatPairActors(0, 1, combatPreview_, false, deltaSeconds, actionDeltaSeconds);
     } else if (combatDirectorEnabled_) {
@@ -1677,7 +1717,7 @@ void IconFightScene::Update(double elapsedSeconds)
             actor.locomotionWeight = BlendTurnLocomotion(
                 actor.locomotionWeight, targetWeight, deltaSeconds);
         };
-        const double actorTime = elapsedSeconds_ - kAwakeningStartSeconds - actor.awakeningDelay;
+        const double actorTime = elapsedSeconds_ - actor.awakeningStartSeconds;
         if (actor.combatPreviewActor) {
             continue;
         }
@@ -1848,7 +1888,7 @@ void IconFightScene::UpdateCombatPairActors(
     IconActor& defender = actors_[defenderIndex];
     const CombatPairPlan& plan = GetCombatPairPlan(scenario);
     const auto isAwake = [this](const IconActor& actor) {
-        const double actorTime = elapsedSeconds_ - kAwakeningStartSeconds - actor.awakeningDelay;
+        const double actorTime = elapsedSeconds_ - actor.awakeningStartSeconds;
         return actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
     };
     const bool bothAwake = isAwake(attacker) && isAwake(defender);
@@ -2130,13 +2170,57 @@ void IconFightScene::UpdateCombatPairActors(
     }
 }
 
+void IconFightScene::UpdateAwakeningSchedule()
+{
+    for (std::size_t index = 0; index < actors_.size(); ++index) {
+        const IconActor& actor = actors_[index];
+        const double actorTime = elapsedSeconds_ - actor.awakeningStartSeconds;
+        const bool fullyGrown = actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
+        awakeningObservations_[index] = {
+            index,
+            actor.x,
+            actor.y,
+            std::max(actor.planeWidth, actor.planeHeight),
+            fullyGrown &&
+                !actor.actionPreviewActor &&
+                !actor.turnPreviewActor &&
+                !actor.combatPreviewActor &&
+                actor.actionPlayer.State().actionId == ActionId::None,
+        };
+    }
+
+    if (UpdateAwakeningProximity(
+            awakeningDirectorState_, awakeningObservations_, elapsedSeconds_)) {
+        for (std::size_t index = 0; index < actors_.size(); ++index) {
+            actors_[index].awakeningStartSeconds =
+                GetActorAwakeningStartSeconds(awakeningDirectorState_, index);
+        }
+    }
+
+    if (!awakeningReadinessLogged_ &&
+        IsFirstWaveEcosystemReady(awakeningDirectorState_, awakeningObservations_)) {
+        awakeningReadinessLogged_ = true;
+        LogInfo(
+            L"awakening first-wave ecosystem ready at " +
+            std::to_wstring(elapsedSeconds_) + L"s");
+    }
+    if (!awakeningCompletionLogged_ && !actors_.empty() &&
+        elapsedSeconds_ >= LatestAwakeningStartSeconds(awakeningDirectorState_)) {
+        awakeningCompletionLogged_ = true;
+        LogInfo(
+            L"awakening final actor started at " + std::to_wstring(elapsedSeconds_) +
+            L"s; proximity accelerations=" +
+            std::to_wstring(awakeningDirectorState_.proximityAccelerationCount));
+    }
+}
+
 void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDeltaSeconds)
 {
     combatDirectorCandidates_.clear();
     combatDirectorCandidates_.reserve(actors_.size());
     for (std::size_t index = 0; index < actors_.size(); ++index) {
         const IconActor& actor = actors_[index];
-        const double actorTime = elapsedSeconds_ - kAwakeningStartSeconds - actor.awakeningDelay;
+        const double actorTime = elapsedSeconds_ - actor.awakeningStartSeconds;
         const bool awake = actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
         combatDirectorCandidates_.push_back(CombatDirectorCandidate{
             index,
@@ -2157,7 +2241,11 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
         static_cast<double>(wanderBounds_.bottom),
     };
     const CombatDirectorSelection selection = besktop::UpdateCombatDirector(
-        combatDirectorState_, combatDirectorCandidates_, bounds, actionDeltaSeconds);
+        combatDirectorState_,
+        combatDirectorCandidates_,
+        bounds,
+        actionDeltaSeconds,
+        IsFirstWaveEcosystemReady(awakeningDirectorState_, awakeningObservations_));
     if (selection.started) {
         const std::size_t rejectedSinceLastRound =
             combatDirectorState_.spaceRejectedTotal - combatDirectorSpaceRejectsLogged_;
@@ -2426,20 +2514,19 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
 
 IconFightScene::ScenePhase IconFightScene::DeterminePhase(double elapsedSeconds) const
 {
-    if (elapsedSeconds < kAwakeningStartSeconds) {
-        return ScenePhase::Sleeping;
-    }
-    if (elapsedSeconds < kAwakeningStartSeconds + kAwakeningDurationSeconds) {
-        return ScenePhase::Awakening;
-    }
-    double lastDelay = 0.0;
+    bool anyStarted = false;
+    bool anyAwakening = false;
+    bool allFullyGrown = !actors_.empty();
     for (const IconActor& actor : actors_) {
-        lastDelay = std::max(lastDelay, actor.awakeningDelay);
+        const double actorTime = elapsedSeconds - actor.awakeningStartSeconds;
+        anyStarted = anyStarted || actorTime >= 0.0;
+        anyAwakening = anyAwakening || (actorTime >= 0.0 && actorTime < kAwakeningDurationSeconds);
+        allFullyGrown = allFullyGrown &&
+            actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
     }
-    if (elapsedSeconds < kAwakeningStartSeconds + lastDelay + kAwakeningDurationSeconds + kLimbGrowthDurationSeconds) {
-        return ScenePhase::GrowingLimbs;
-    }
-    return ScenePhase::Wandering;
+    if (!anyStarted) return ScenePhase::Sleeping;
+    if (anyAwakening) return ScenePhase::Awakening;
+    return allFullyGrown ? ScenePhase::Wandering : ScenePhase::GrowingLimbs;
 }
 
 void IconFightScene::LogPhase(ScenePhase phase)

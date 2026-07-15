@@ -9,6 +9,7 @@
 
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/animation/action_player.h"
+#include "besktop/animation/awakening_director.h"
 #include "besktop/animation/combat_pair.h"
 #include "besktop/animation/combat_director.h"
 #include "besktop/animation/turn_motion.h"
@@ -90,7 +91,7 @@ public:
         double walkSpeed = 80.0;
         double waitRemaining = 0.0;
         double reservationAvoidanceCooldown = 0.0;
-        double awakeningDelay = 0.0;
+        double awakeningStartSeconds = 0.0;
         double walkPhase = 0.0;
         double locomotionWeight = 0.0;
         double turnPoseWeight = 1.0;
@@ -139,6 +140,7 @@ private:
         double deltaSeconds,
         double actionDeltaSeconds);
     void UpdateCombatDirector(double deltaSeconds, double actionDeltaSeconds);
+    void UpdateAwakeningSchedule();
     void ConfigureCombatStations(
         std::size_t attackerIndex,
         std::size_t defenderIndex,
@@ -160,6 +162,11 @@ private:
     ActionId previewAction_ = ActionId::None;
     CombatScenarioId combatPreview_ = CombatScenarioId::None;
     CombatPairState combatPairState_{};
+    AwakeningDirectorState awakeningDirectorState_{};
+    std::vector<AwakeningActorInput> awakeningInputs_;
+    std::vector<AwakeningActorObservation> awakeningObservations_;
+    bool awakeningReadinessLogged_ = false;
+    bool awakeningCompletionLogged_ = false;
     CombatDirectorState combatDirectorState_{};
     std::vector<CombatDirectorCandidate> combatDirectorCandidates_;
     bool combatDirectorEnabled_ = false;

@@ -97,7 +97,8 @@ CombatDirectorSelection UpdateCombatDirector(
     CombatDirectorState& state,
     std::span<const CombatDirectorCandidate> candidates,
     const CombatDirectorBounds& bounds,
-    double deltaSeconds)
+    double deltaSeconds,
+    bool ecosystemReady)
 {
     CombatDirectorSelection selection;
     if (state.phase == CombatDirectorPhase::Disabled || !std::isfinite(deltaSeconds) || deltaSeconds < 0.0) {
@@ -117,11 +118,7 @@ CombatDirectorSelection UpdateCombatDirector(
         state.retryRemaining = GetCombatDirectorTuning().retryMinimumSeconds;
     }
 
-    std::size_t awakeCount = 0;
-    for (const CombatDirectorCandidate& candidate : candidates) {
-        if (candidate.awake) ++awakeCount;
-    }
-    if (state.completedInteractionCount == 0 && awakeCount < candidates.size()) return selection;
+    if (state.completedInteractionCount == 0 && !ecosystemReady) return selection;
     if (state.openingWanderRemaining > 0.0) {
         state.openingWanderRemaining = std::max(0.0, state.openingWanderRemaining - delta);
         if (state.openingWanderRemaining > 0.0) return selection;

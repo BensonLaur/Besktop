@@ -40,12 +40,22 @@ void TestOpeningDelayAndEligibility()
     Check(!UpdateCombatDirector(state, candidates, bounds, 5.5).started, "opening wander blocks early selection");
     Check(UpdateCombatDirector(state, candidates, bounds, 0.5).started, "selection starts after opening wander");
 
-    InitializeCombatDirector(state, true, candidates.size(), 4u);
-    candidates[0].awake = false;
-    Check(!UpdateCombatDirector(state, candidates, bounds, 20.0).started, "opening waits until all actors awake");
-    candidates[0].awake = true;
-    Check(!UpdateCombatDirector(state, candidates, bounds, 5.5).started, "opening begins after all actors awake");
-    Check(UpdateCombatDirector(state, candidates, bounds, 0.5).started, "post-awakening opening completes");
+    std::array partialCandidates{
+        Candidate(0, 350.0, 400.0),
+        Candidate(1, 550.0, 400.0),
+        Candidate(2, 800.0, 650.0),
+    };
+    partialCandidates[2].awake = false;
+    partialCandidates[2].wandering = false;
+    InitializeCombatDirector(state, true, partialCandidates.size(), 4u);
+    Check(!UpdateCombatDirector(state, partialCandidates, bounds, 20.0, false).started,
+        "opening waits until awakening ecosystem is ready");
+    Check(state.openingWanderRemaining == GetCombatDirectorTuning().openingWanderSeconds,
+        "readiness gate freezes opening buffer");
+    Check(!UpdateCombatDirector(state, partialCandidates, bounds, 5.5, true).started,
+        "opening begins after first-wave readiness");
+    Check(UpdateCombatDirector(state, partialCandidates, bounds, 0.5, true).started,
+        "ready first wave starts interaction without waiting for every actor");
 
     InitializeCombatDirector(state, true, candidates.size());
     SkipOpening(state);

@@ -126,7 +126,8 @@ CombatDirectorSelection UpdateCombatDirector(
     CombatDirectorState& state,
     std::span<const CombatDirectorCandidate> candidates,
     const CombatDirectorBounds& bounds,
-    double deltaSeconds);
+    double deltaSeconds,
+    bool ecosystemReady = true);
 
 void CompleteCombatDirectorInteraction(CombatDirectorState& state);
 CombatDirectorModeChange SetCombatDirectorEnabled(CombatDirectorState& state, bool enabled);
