@@ -9,6 +9,7 @@
 
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/animation/action_player.h"
+#include "besktop/animation/active_encounter_pool.h"
 #include "besktop/animation/actor_ecosystem.h"
 #include "besktop/animation/awakening_director.h"
 #include "besktop/animation/combat_pair.h"
@@ -143,6 +144,11 @@ private:
         std::size_t defenderIndex,
         CombatScenarioId scenario,
         bool directorInteraction,
+        CombatPairState& pairState,
+        double stationLeftX,
+        double stationRightX,
+        double stationY,
+        CombatPairPhase& loggedPhase,
         double deltaSeconds,
         double actionDeltaSeconds);
     void UpdateCombatDirector(double deltaSeconds, double actionDeltaSeconds);
@@ -173,9 +179,8 @@ private:
     std::vector<AwakeningActorObservation> awakeningObservations_;
     bool awakeningReadinessLogged_ = false;
     bool awakeningCompletionLogged_ = false;
-    CombatDirectorState combatDirectorState_{};
-    EncounterState encounterState_{};
-    std::vector<CombatDirectorCandidate> combatDirectorCandidates_;
+    ActiveEncounterPoolState activeEncounterPool_{};
+    std::vector<ActiveEncounterActorInput> activeEncounterActorInputs_;
     std::vector<ActorPerceptionInput> ecosystemPerceptionInputs_;
     std::vector<ActorRuntimeState> ecosystemRuntimeSnapshots_;
     std::vector<LocalIntent> ecosystemIntentSnapshot_;
@@ -186,9 +191,8 @@ private:
     double combatStationRightX_ = 0.0;
     double combatStationY_ = 0.0;
     std::size_t combatDirectorAvoidanceReplans_ = 0;
-    std::size_t combatDirectorSpaceRejectsLogged_ = 0;
+    std::size_t loggedActiveEncounterCount_ = 0;
     CombatPairPhase loggedCombatPhase_ = CombatPairPhase::Inactive;
-    EncounterPhase loggedEncounterPhase_ = EncounterPhase::Inactive;
     bool actionOrbitCameraEnabled_ = false;
     bool turnPreviewEnabled_ = false;
     std::wstring automaticInteractionToast_;

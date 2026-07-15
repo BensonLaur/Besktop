@@ -40,6 +40,7 @@ add_library(besktop_runtime STATIC
 )
 
 add_library(besktop_animation STATIC
+    src/besktop/animation/active_encounter_pool.cpp
     src/besktop/animation/action_clip.cpp
     src/besktop/animation/action_player.cpp
     src/besktop/animation/actor_ecosystem.cpp
@@ -131,6 +132,11 @@ add_executable(besktop_ecosystem_tests
 )
 target_link_libraries(besktop_ecosystem_tests PRIVATE besktop_animation)
 
+add_executable(besktop_active_encounter_pool_tests
+    tests/active_encounter_pool_tests.cpp
+)
+target_link_libraries(besktop_active_encounter_pool_tests PRIVATE besktop_animation)
+
 enable_testing()
 add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 add_test(NAME besktop_combat_tests COMMAND besktop_combat_tests)
@@ -139,6 +145,7 @@ add_test(NAME besktop_runtime_options_tests COMMAND besktop_runtime_options_test
 add_test(NAME besktop_awakening_tests COMMAND besktop_awakening_tests)
 add_test(NAME besktop_encounter_tests COMMAND besktop_encounter_tests)
 add_test(NAME besktop_ecosystem_tests COMMAND besktop_ecosystem_tests)
+add_test(NAME besktop_active_encounter_pool_tests COMMAND besktop_active_encounter_pool_tests)
 
 # Some localized MSVC + NMake environments do not produce usable /showIncludes
 # dependency files. Keep project headers as explicit object dependencies so an
@@ -146,7 +153,8 @@ add_test(NAME besktop_ecosystem_tests COMMAND besktop_ecosystem_tests)
 # class layouts.
 if(MSVC AND CMAKE_GENERATOR STREQUAL "NMake Makefiles")
     file(GLOB_RECURSE BESKTOP_CORE_HEADERS CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.inl")
     foreach(target_name IN ITEMS
             besktop_runtime
             besktop_animation
@@ -158,7 +166,8 @@ if(MSVC AND CMAKE_GENERATOR STREQUAL "NMake Makefiles")
             besktop_runtime_options_tests
             besktop_awakening_tests
             besktop_encounter_tests
-            besktop_ecosystem_tests)
+            besktop_ecosystem_tests
+            besktop_active_encounter_pool_tests)
         get_target_property(target_sources ${target_name} SOURCES)
         foreach(source_file IN LISTS target_sources)
             if(source_file MATCHES "\\.(cc|cpp|cxx)$")
@@ -200,5 +209,7 @@ if(MSVC)
     set_property(TARGET besktop_encounter_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_ecosystem_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_active_encounter_pool_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
