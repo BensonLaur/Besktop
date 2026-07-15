@@ -18,6 +18,7 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kAwakeningStartSeconds = 0.30;
 constexpr double kAwakeningDurationSeconds = 0.48;
 constexpr double kLimbGrowthDurationSeconds = 0.72;
+constexpr ULONGLONG kAutomaticInteractionToastMilliseconds = 1600;
 
 LONGLONG PerformanceCounterNow()
 {
@@ -1342,6 +1343,18 @@ IconFightScene::IconFightScene()
 
 IconFightScene::~IconFightScene() = default;
 
+bool IconFightScene::ToggleAutomaticInteractions()
+{
+    if (!combatDirectorEnabled_) return false;
+    const CombatDirectorModeChange change = ToggleCombatDirectorEnabled(combatDirectorState_);
+    if (change == CombatDirectorModeChange::NoChange) return false;
+    automaticInteractionToast_ = combatDirectorState_.desiredEnabled ?
+        L"\u81ea\u52a8\u4e92\u52a8\uff1a\u5df2\u5f00\u542f" :
+        L"\u81ea\u52a8\u4e92\u52a8\uff1a\u5df2\u5173\u95ed\uff0c\u4ec5\u81ea\u7531\u6f2b\u6e38";
+    automaticInteractionToastStartTick_ = GetTickCount64();
+    return true;
+}
+
 void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRect)
 {
     actors_.clear();
@@ -1354,9 +1367,13 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     elapsedSeconds_ = 0.0;
     previousElapsedSeconds_ = 0.0;
     phase_ = ScenePhase::Sleeping;
-    combatPreview_ = GetRuntimeOptions().combatPreview;
-    combatDirectorEnabled_ = combatPreview_ == CombatScenarioId::None &&
-        GetRuntimeOptions().combatDirectorPreviewEnabled;
+    const RuntimeOptions& options = GetRuntimeOptions();
+    const RuntimeExperienceMode experienceMode = ResolveRuntimeExperienceMode(options);
+    combatPreview_ = experienceMode == RuntimeExperienceMode::FixedCombatPreview ?
+        options.combatPreview : CombatScenarioId::None;
+    combatDirectorEnabled_ = experienceMode == RuntimeExperienceMode::CombatDirector;
+    combatDirectorDiagnosticsEnabled_ = combatDirectorEnabled_ &&
+        options.combatDirectorDiagnosticsEnabled;
     combatPairState_ = {};
     combatDirectorState_ = {};
     combatDirectorCandidates_.clear();
@@ -1364,11 +1381,12 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     combatDirectorAvoidanceReplans_ = 0;
     combatDirectorSpaceRejectsLogged_ = 0;
     loggedCombatPhase_ = CombatPairPhase::Inactive;
-    previewAction_ = combatPreview_ == CombatScenarioId::None && !combatDirectorEnabled_ ?
-        GetRuntimeOptions().actionPreview : ActionId::None;
-    actionOrbitCameraEnabled_ = GetRuntimeOptions().actionOrbitCameraEnabled;
-    turnPreviewEnabled_ = combatPreview_ == CombatScenarioId::None && !combatDirectorEnabled_ &&
-        GetRuntimeOptions().turnPreviewEnabled;
+    previewAction_ = experienceMode == RuntimeExperienceMode::ActionPreview ?
+        options.actionPreview : ActionId::None;
+    actionOrbitCameraEnabled_ = options.actionOrbitCameraEnabled;
+    turnPreviewEnabled_ = experienceMode == RuntimeExperienceMode::TurnPreview;
+    automaticInteractionToast_.clear();
+    automaticInteractionToastStartTick_ = 0;
 
     const unsigned char colors[][3] = {
         {44, 135, 255},
@@ -1525,19 +1543,15 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         }
     }
     if (combatDirectorEnabled_) {
-        if (actors_.size() < 2) {
-            LogWarning(L"combat director preview requires at least two valid actors; preview disabled");
-            combatDirectorEnabled_ = false;
-            InitializeCombatDirector(combatDirectorState_, false, actors_.size());
-        } else {
-            const CombatDirectorTuning& tuning = GetCombatDirectorTuning();
-            LogInfo(
-                L"combat director preview enabled; maximum active pairs: 1; opening=" +
-                std::to_wstring(tuning.openingWanderSeconds) +
-                L"s; global cooldown=" + std::to_wstring(tuning.globalCooldownMinimumSeconds) +
-                L"-" + std::to_wstring(tuning.globalCooldownMaximumSeconds) +
-                L"s; actor cooldown=" + std::to_wstring(tuning.actorCooldownSeconds) + L"s");
-        }
+        const CombatDirectorTuning& tuning = GetCombatDirectorTuning();
+        LogInfo(
+            std::wstring(L"combat director ") +
+            (combatDirectorDiagnosticsEnabled_ ? L"diagnostic preview" : L"product mode") +
+            L" enabled; maximum active pairs: 1; opening=" +
+            std::to_wstring(tuning.openingWanderSeconds) +
+            L"s; global cooldown=" + std::to_wstring(tuning.globalCooldownMinimumSeconds) +
+            L"-" + std::to_wstring(tuning.globalCooldownMaximumSeconds) +
+            L"s; actor cooldown=" + std::to_wstring(tuning.actorCooldownSeconds) + L"s");
     }
     size_t boundActorCount = 0;
     size_t labelBoundsActorCount = 0;
@@ -1642,6 +1656,12 @@ void IconFightScene::ConfigureCombatStations(
 
 void IconFightScene::Update(double elapsedSeconds)
 {
+    if (automaticInteractionToastStartTick_ != 0 &&
+        GetTickCount64() - automaticInteractionToastStartTick_ >=
+            kAutomaticInteractionToastMilliseconds) {
+        automaticInteractionToast_.clear();
+        automaticInteractionToastStartTick_ = 0;
+    }
     const double unboundedDeltaSeconds = std::max(0.0, elapsedSeconds - previousElapsedSeconds_);
     const double deltaSeconds = std::clamp(unboundedDeltaSeconds, 0.0, 0.10);
     const double actionDeltaSeconds = std::clamp(unboundedDeltaSeconds, 0.0, 1.0);
@@ -2366,6 +2386,35 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
     }
 
     Gdiplus::FontFamily fontFamily(L"Microsoft YaHei UI");
+    if (!automaticInteractionToast_.empty()) {
+        const ULONGLONG now = GetTickCount64();
+        const ULONGLONG elapsed = now >= automaticInteractionToastStartTick_ ?
+            now - automaticInteractionToastStartTick_ : kAutomaticInteractionToastMilliseconds;
+        if (elapsed < kAutomaticInteractionToastMilliseconds) {
+            const double remaining = static_cast<double>(
+                kAutomaticInteractionToastMilliseconds - elapsed);
+            const double fade = std::clamp(remaining / 420.0, 0.0, 1.0);
+            const double workWidth = std::max(
+                0.0, static_cast<double>(wanderBounds_.right - wanderBounds_.left));
+            const float toastWidth = ToFloat(std::clamp(workWidth - 40.0, 220.0, 360.0));
+            const float toastHeight = 42.0f;
+            const float toastX = ToFloat(std::max(
+                static_cast<double>(wanderBounds_.left) + 20.0,
+                static_cast<double>(wanderBounds_.right) - toastWidth - 20.0));
+            const float toastY = ToFloat(static_cast<double>(wanderBounds_.top) + 20.0);
+            const unsigned char backgroundAlpha = static_cast<unsigned char>(150.0 * fade);
+            const unsigned char textAlpha = static_cast<unsigned char>(240.0 * fade);
+            Gdiplus::SolidBrush backgroundBrush(Gdiplus::Color(backgroundAlpha, 18, 24, 34));
+            graphics.FillRectangle(&backgroundBrush, toastX, toastY, toastWidth, toastHeight);
+            Gdiplus::Font toastFont(&fontFamily, 16.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+            DrawCenteredString(
+                graphics,
+                automaticInteractionToast_,
+                Gdiplus::RectF(toastX, toastY + 8.0f, toastWidth, 24.0f),
+                toastFont,
+                Gdiplus::Color(textAlpha, 255, 255, 255));
+        }
+    }
     Gdiplus::Font hintFont(&fontFamily, 13.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
     DrawCenteredString(
         graphics,

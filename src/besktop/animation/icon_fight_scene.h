@@ -65,6 +65,7 @@ public:
     void Reset(const DesktopSnapshot& snapshot, const RECT& clientRect);
     void Update(double elapsedSeconds);
     void Render(HDC hdc, const RECT& clientRect, RenderTimings* timings = nullptr) const;
+    bool ToggleAutomaticInteractions();
 
     // Public for the small free functions in the implementation file; this is
     // still an internal scene type, not a plugin-facing API.
@@ -162,6 +163,7 @@ private:
     CombatDirectorState combatDirectorState_{};
     std::vector<CombatDirectorCandidate> combatDirectorCandidates_;
     bool combatDirectorEnabled_ = false;
+    bool combatDirectorDiagnosticsEnabled_ = false;
     double combatStationLeftX_ = 0.0;
     double combatStationRightX_ = 0.0;
     double combatStationY_ = 0.0;
@@ -171,6 +173,8 @@ private:
     CombatPairPhase loggedCombatPhase_ = CombatPairPhase::Inactive;
     bool actionOrbitCameraEnabled_ = false;
     bool turnPreviewEnabled_ = false;
+    std::wstring automaticInteractionToast_;
+    ULONGLONG automaticInteractionToastStartTick_ = 0;
 };
 
 } // namespace besktop

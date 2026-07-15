@@ -205,6 +205,62 @@ void TestParticipationSpreadsAcrossActors()
     Check(represented >= 5, "multi-round selection gives most actors an opportunity");
 }
 
+void TestRuntimeModeToggle()
+{
+    using namespace besktop;
+    CombatDirectorState state;
+    InitializeCombatDirector(state, true, 2, 4u);
+    state.openingWanderRemaining = 2.5;
+    state.globalCooldownRemaining = 3.0;
+    state.actorCooldowns[0] = 5.0;
+    Check(SetCombatDirectorEnabled(state, false) == CombatDirectorModeChange::Disabled,
+        "idle disable takes effect immediately");
+    Check(state.phase == CombatDirectorPhase::Disabled && !state.desiredEnabled,
+        "disabled mode enters explicit disabled phase");
+    const double frozenOpening = state.openingWanderRemaining;
+    const double frozenGlobal = state.globalCooldownRemaining;
+    const double frozenActor = state.actorCooldowns[0];
+    const CombatDirectorBounds bounds{0.0, 0.0, 1000.0, 800.0};
+    std::array candidates{Candidate(0, 350.0, 400.0), Candidate(1, 550.0, 400.0)};
+    Check(!UpdateCombatDirector(state, candidates, bounds, 30.0).started,
+        "disabled mode does not select actors");
+    Check(state.openingWanderRemaining == frozenOpening &&
+        state.globalCooldownRemaining == frozenGlobal &&
+        state.actorCooldowns[0] == frozenActor,
+        "disabled mode freezes hidden timers");
+
+    state.globalCooldownRemaining = 0.0;
+    state.actorCooldowns[0] = 0.0;
+    Check(SetCombatDirectorEnabled(state, true) == CombatDirectorModeChange::Enabled,
+        "reenable enters safe idle mode");
+    Check(state.phase == CombatDirectorPhase::Idle && state.desiredEnabled &&
+        state.openingWanderRemaining == GetCombatDirectorTuning().resumeWanderSeconds,
+        "reenable applies natural wandering buffer");
+    Check(!UpdateCombatDirector(state, candidates, bounds, 3.5).started,
+        "resume buffer prevents immediate interaction");
+    Check(UpdateCombatDirector(state, candidates, bounds, 0.5).started,
+        "interaction can resume after buffer");
+
+    Check(SetCombatDirectorEnabled(state, false) == CombatDirectorModeChange::DisableDeferred,
+        "active disable is deferred");
+    Check(state.phase == CombatDirectorPhase::Active && state.reservation.active,
+        "deferred disable preserves active round and reservation");
+    Check(!UpdateCombatDirector(state, candidates, bounds, 60.0).started,
+        "deferred disable cannot start another round");
+    CompleteCombatDirectorInteraction(state);
+    Check(state.phase == CombatDirectorPhase::Disabled && !state.reservation.active,
+        "active round releases into disabled mode");
+    Check(state.actorCooldowns[0] > 0.0 && state.actorCooldowns[1] > 0.0,
+        "deferred disable preserves participant cooldowns");
+
+    Check(ToggleCombatDirectorEnabled(state) == CombatDirectorModeChange::Enabled,
+        "rapid toggle can reenable safely");
+    Check(ToggleCombatDirectorEnabled(state) == CombatDirectorModeChange::Disabled,
+        "rapid second toggle returns to disabled safely");
+    Check(!state.reservation.active && state.phase == CombatDirectorPhase::Disabled,
+        "rapid toggles do not leak reservation");
+}
+
 } // namespace
 
 int main()
@@ -215,6 +271,7 @@ int main()
     TestSpaceFailureReleaseAndResultHold();
     TestScenarioRotationAndLargeDelta();
     TestParticipationSpreadsAcrossActors();
+    TestRuntimeModeToggle();
     if (failures != 0) return 1;
     std::cout << "besktop_combat_director_tests: all checks passed\n";
     return 0;

@@ -84,6 +84,7 @@ void InitializeCombatDirector(
 {
     state = {};
     state.phase = enabled ? CombatDirectorPhase::Idle : CombatDirectorPhase::Disabled;
+    state.desiredEnabled = enabled;
     state.retryRemaining = 0.0;
     state.openingWanderRemaining = enabled ? GetCombatDirectorTuning().openingWanderSeconds : 0.0;
     state.randomState = seed == 0 ? 0xC001D00Du : seed;
@@ -125,6 +126,7 @@ CombatDirectorSelection UpdateCombatDirector(
         state.openingWanderRemaining = std::max(0.0, state.openingWanderRemaining - delta);
         if (state.openingWanderRemaining > 0.0) return selection;
     }
+    if (state.globalCooldownRemaining > 0.0) return selection;
     state.retryRemaining = std::max(0.0, state.retryRemaining - delta);
     if (state.retryRemaining > 0.0) return selection;
 
@@ -228,7 +230,42 @@ void CompleteCombatDirectorInteraction(CombatDirectorState& state)
     if (state.actorCooldowns.size() <= 6) {
         state.globalCooldownRemaining += tuning.sparseActorCooldownBonusSeconds;
     }
-    state.phase = CombatDirectorPhase::Cooldown;
+    state.phase = state.desiredEnabled && !state.disableAfterActive ?
+        CombatDirectorPhase::Cooldown : CombatDirectorPhase::Disabled;
+    state.disableAfterActive = false;
+}
+
+CombatDirectorModeChange SetCombatDirectorEnabled(CombatDirectorState& state, bool enabled)
+{
+    if (state.desiredEnabled == enabled) return CombatDirectorModeChange::NoChange;
+    state.desiredEnabled = enabled;
+    if (!enabled) {
+        if (state.phase == CombatDirectorPhase::Active) {
+            state.disableAfterActive = true;
+            return CombatDirectorModeChange::DisableDeferred;
+        }
+        state.phase = CombatDirectorPhase::Disabled;
+        state.reservation = {};
+        state.scenario = CombatScenarioId::None;
+        state.disableAfterActive = false;
+        return CombatDirectorModeChange::Disabled;
+    }
+
+    state.disableAfterActive = false;
+    if (state.phase == CombatDirectorPhase::Active) {
+        return CombatDirectorModeChange::Enabled;
+    }
+    state.phase = CombatDirectorPhase::Idle;
+    state.reservation = {};
+    state.scenario = CombatScenarioId::None;
+    state.retryRemaining = 0.0;
+    state.openingWanderRemaining = GetCombatDirectorTuning().resumeWanderSeconds;
+    return CombatDirectorModeChange::Enabled;
+}
+
+CombatDirectorModeChange ToggleCombatDirectorEnabled(CombatDirectorState& state)
+{
+    return SetCombatDirectorEnabled(state, !state.desiredEnabled);
 }
 
 bool AdvanceCombatDirectorResultHold(CombatDirectorState& state, double deltaSeconds)

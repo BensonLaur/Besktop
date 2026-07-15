@@ -777,6 +777,12 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             Close();
             return 0;
         }
+        if (wParam == 'P' &&
+            (static_cast<ULONG_PTR>(lParam) & (static_cast<ULONG_PTR>(1) << 30)) == 0 &&
+            scene_.ToggleAutomaticInteractions()) {
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
         break;
     case WM_HOTKEY:
         if (wParam == kForceExitHotkeyId) {

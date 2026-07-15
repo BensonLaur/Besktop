@@ -18,6 +18,13 @@ enum class CombatDirectorPhase {
     Cooldown,
 };
 
+enum class CombatDirectorModeChange {
+    NoChange,
+    Enabled,
+    Disabled,
+    DisableDeferred,
+};
+
 struct CombatDirectorBounds {
     double left = 0.0;
     double top = 0.0;
@@ -65,6 +72,7 @@ struct CombatDirectorTuning {
     double sparseActorCooldownBonusSeconds = 4.0;
     double avoidanceReplanIntervalSeconds = 0.85;
     double avoidanceHysteresisScale = 0.28;
+    double resumeWanderSeconds = 4.0;
 };
 
 struct CombatAvoidanceRequest {
@@ -102,6 +110,8 @@ struct CombatDirectorState {
     std::size_t recentPairCursor = 0;
     std::size_t completedInteractionCount = 0;
     std::size_t spaceRejectedTotal = 0;
+    bool desiredEnabled = false;
+    bool disableAfterActive = false;
 };
 
 const CombatDirectorTuning& GetCombatDirectorTuning();
@@ -119,6 +129,8 @@ CombatDirectorSelection UpdateCombatDirector(
     double deltaSeconds);
 
 void CompleteCombatDirectorInteraction(CombatDirectorState& state);
+CombatDirectorModeChange SetCombatDirectorEnabled(CombatDirectorState& state, bool enabled);
+CombatDirectorModeChange ToggleCombatDirectorEnabled(CombatDirectorState& state);
 bool AdvanceCombatDirectorResultHold(CombatDirectorState& state, double deltaSeconds);
 bool CombatDirectorOwnsActor(const CombatDirectorState& state, std::size_t actorIndex);
 bool IsInsideCombatReservation(const CombatReservation& reservation, double x, double y, double margin = 0.0);

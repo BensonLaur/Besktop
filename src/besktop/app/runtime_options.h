@@ -5,6 +5,14 @@
 
 namespace besktop {
 
+enum class RuntimeExperienceMode {
+    Wandering,
+    CombatDirector,
+    FixedCombatPreview,
+    TurnPreview,
+    ActionPreview,
+};
+
 struct RuntimeOptions {
     bool developerBuild = false;
     bool diagnosticsEnabled = false;
@@ -20,12 +28,14 @@ struct RuntimeOptions {
     bool invalidActionPreview = false;
     CombatScenarioId combatPreview = CombatScenarioId::None;
     bool invalidCombatPreview = false;
-    bool combatDirectorPreviewEnabled = false;
+    bool combatDirectorEnabled = true;
+    bool combatDirectorDiagnosticsEnabled = false;
     bool actionOrbitCameraEnabled = false;
     bool turnPreviewEnabled = false;
 };
 
 RuntimeOptions LoadRuntimeOptions();
 const RuntimeOptions& GetRuntimeOptions();
+RuntimeExperienceMode ResolveRuntimeExperienceMode(const RuntimeOptions& options);
 
 } // namespace besktop

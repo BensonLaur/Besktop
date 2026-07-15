@@ -102,7 +102,7 @@ RuntimeOptions LoadRuntimeOptions()
     options.combatPreview = ParseCombatScenarioId(combatPreviewName);
     options.invalidCombatPreview = !combatPreviewName.empty() &&
         options.combatPreview == CombatScenarioId::None;
-    options.combatDirectorPreviewEnabled =
+    options.combatDirectorDiagnosticsEnabled =
         ReadTruthyEnvironmentFlag(L"BESKTOP_COMBAT_DIRECTOR_PREVIEW");
     const std::wstring actionPreviewName = ReadEnvironmentString(L"BESKTOP_ACTION_PREVIEW");
     options.actionPreview = ParseActionId(actionPreviewName);
@@ -116,6 +116,23 @@ const RuntimeOptions& GetRuntimeOptions()
 {
     static const RuntimeOptions options = LoadRuntimeOptions();
     return options;
+}
+
+RuntimeExperienceMode ResolveRuntimeExperienceMode(const RuntimeOptions& options)
+{
+    if (options.combatPreview != CombatScenarioId::None) {
+        return RuntimeExperienceMode::FixedCombatPreview;
+    }
+    if (options.turnPreviewEnabled) {
+        return RuntimeExperienceMode::TurnPreview;
+    }
+    if (options.actionPreview != ActionId::None) {
+        return RuntimeExperienceMode::ActionPreview;
+    }
+    if (options.combatDirectorEnabled || options.combatDirectorDiagnosticsEnabled) {
+        return RuntimeExperienceMode::CombatDirector;
+    }
+    return RuntimeExperienceMode::Wandering;
 }
 
 } // namespace besktop
