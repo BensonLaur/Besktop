@@ -1,6 +1,7 @@
 #pragma once
 
 #include "besktop/animation/actor_ecosystem.h"
+#include "besktop/animation/combat_episode.h"
 #include "besktop/animation/combat_director.h"
 #include "besktop/animation/encounter_arbiter.h"
 
@@ -28,7 +29,7 @@ struct ActiveEncounter {
     CombatScenarioId scenario = CombatScenarioId::None;
     EncounterReservation reservation{};
     EncounterState encounter{};
-    CombatPairState combatPair{};
+    CombatEpisodeState combatEpisode{};
     double stationLeftX = 0.0;
     double stationRightX = 0.0;
     double stationY = 0.0;

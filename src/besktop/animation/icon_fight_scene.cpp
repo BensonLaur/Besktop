@@ -1741,6 +1741,7 @@ void IconFightScene::Update(double elapsedSeconds)
         UpdateCombatPairActors(
             0, 1, combatPreview_, false,
             combatPairState_, combatStationLeftX_, combatStationRightX_, combatStationY_,
+            TurnFacing::Right, TurnFacing::Left,
             loggedCombatPhase_, deltaSeconds, actionDeltaSeconds);
     } else if (combatDirectorEnabled_) {
         UpdateCombatDirector(deltaSeconds, actionDeltaSeconds);
@@ -1916,9 +1917,11 @@ void IconFightScene::UpdateCombatPairActors(
     CombatScenarioId scenario,
     bool directorInteraction,
     CombatPairState& pairState,
-    double stationLeftX,
-    double stationRightX,
+    double attackerStationX,
+    double defenderStationX,
     double stationY,
+    TurnFacing attackerFacing,
+    TurnFacing defenderFacing,
     CombatPairPhase& loggedPhase,
     double deltaSeconds,
     double actionDeltaSeconds)
@@ -1943,12 +1946,12 @@ void IconFightScene::UpdateCombatPairActors(
     const auto distanceToStation = [](const IconActor& actor, double stationX, double stationY) {
         return std::hypot(stationX - actor.x, stationY - actor.y);
     };
-    const bool atStations = distanceToStation(attacker, stationLeftX, stationY) <= 1.5 &&
-        distanceToStation(defender, stationRightX, stationY) <= 1.5;
+    const bool atStations = distanceToStation(attacker, attackerStationX, stationY) <= 1.5 &&
+        distanceToStation(defender, defenderStationX, stationY) <= 1.5;
     const bool aligned = atStations &&
         !attacker.turnMotion.turning && !defender.turnMotion.turning &&
-        attacker.turnMotion.currentFacing == TurnFacing::Right &&
-        defender.turnMotion.currentFacing == TurnFacing::Left;
+        attacker.turnMotion.currentFacing == attackerFacing &&
+        defender.turnMotion.currentFacing == defenderFacing;
     CombatPairReadiness readiness;
     readiness.bothAwake = bothAwake;
     readiness.atStations = atStations;
@@ -1999,17 +2002,17 @@ void IconFightScene::UpdateCombatPairActors(
 
     if (!directorInteraction && (pairState.phase == CombatPairPhase::Approaching ||
         pairState.phase == CombatPairPhase::Returning)) {
-        moveTo(attacker, stationLeftX, stationY);
-        moveTo(defender, stationRightX, stationY);
+        moveTo(attacker, attackerStationX, stationY);
+        moveTo(defender, defenderStationX, stationY);
     } else if (!directorInteraction && pairState.phase == CombatPairPhase::Aligning) {
         blendLocomotion(attacker, 0.0);
         blendLocomotion(defender, 0.0);
         if (attacker.locomotionWeight <= 0.02) {
-            if (!attacker.turnMotion.turning) RequestTurn(attacker.turnMotion, TurnFacing::Right);
+            if (!attacker.turnMotion.turning) RequestTurn(attacker.turnMotion, attackerFacing);
             UpdateTurnMotion(attacker.turnMotion, actionDeltaSeconds);
         }
         if (defender.locomotionWeight <= 0.02) {
-            if (!defender.turnMotion.turning) RequestTurn(defender.turnMotion, TurnFacing::Left);
+            if (!defender.turnMotion.turning) RequestTurn(defender.turnMotion, defenderFacing);
             UpdateTurnMotion(defender.turnMotion, actionDeltaSeconds);
         }
     } else {

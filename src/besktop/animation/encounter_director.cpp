@@ -148,7 +148,8 @@ EncounterAftermathPlan BuildEncounterAftermathPlan(
     bool attackerActsFirst,
     const EncounterReservation& reservation,
     const EncounterBounds& bounds,
-    double actorMargin)
+    double actorMargin,
+    bool combatAttackerIsPrimary)
 {
     EncounterAftermathPlan plan;
     plan.result = result;
@@ -219,6 +220,15 @@ EncounterAftermathPlan BuildEncounterAftermathPlan(
             defenderY = -0.18;
             break;
         }
+        if (!combatAttackerIsPrimary) {
+            std::swap(plan.attackerDepartureDelaySeconds, plan.defenderDepartureDelaySeconds);
+            const double previousAttackerX = attackerX;
+            const double previousAttackerY = attackerY;
+            attackerX = -defenderX;
+            attackerY = defenderY;
+            defenderX = -previousAttackerX;
+            defenderY = previousAttackerY;
+        }
     }
 
     plan.attackerExit = SafePoint(reservation, bounds, actorMargin, attackerX, attackerY);
@@ -286,7 +296,8 @@ EncounterStep UpdateEncounter(
             if (!readiness.combatComplete || readiness.combatResult == CombatResult::None) return step;
             state.aftermath = BuildEncounterAftermathPlan(
                 state.intent, readiness.combatResult, state.attackerActsFirst,
-                state.reservation, state.bounds, state.actorMargin);
+                state.reservation, state.bounds, state.actorMargin,
+                readiness.combatAttackerIsPrimary);
             SetPhase(state, EncounterPhase::Aftermath);
             break;
         case EncounterPhase::Aftermath:

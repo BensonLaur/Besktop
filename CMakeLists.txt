@@ -45,6 +45,7 @@ add_library(besktop_animation STATIC
     src/besktop/animation/action_player.cpp
     src/besktop/animation/actor_ecosystem.cpp
     src/besktop/animation/awakening_director.cpp
+    src/besktop/animation/combat_episode.cpp
     src/besktop/animation/combat_pair.cpp
     src/besktop/animation/combat_director.cpp
     src/besktop/animation/encounter_arbiter.cpp
@@ -106,6 +107,11 @@ add_executable(besktop_combat_tests
 )
 target_link_libraries(besktop_combat_tests PRIVATE besktop_animation)
 
+add_executable(besktop_combat_episode_tests
+    tests/combat_episode_tests.cpp
+)
+target_link_libraries(besktop_combat_episode_tests PRIVATE besktop_animation)
+
 add_executable(besktop_combat_director_tests
     tests/combat_director_tests.cpp
 )
@@ -140,6 +146,7 @@ target_link_libraries(besktop_active_encounter_pool_tests PRIVATE besktop_animat
 enable_testing()
 add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 add_test(NAME besktop_combat_tests COMMAND besktop_combat_tests)
+add_test(NAME besktop_combat_episode_tests COMMAND besktop_combat_episode_tests)
 add_test(NAME besktop_combat_director_tests COMMAND besktop_combat_director_tests)
 add_test(NAME besktop_runtime_options_tests COMMAND besktop_runtime_options_tests)
 add_test(NAME besktop_awakening_tests COMMAND besktop_awakening_tests)
@@ -162,6 +169,7 @@ if(MSVC AND CMAKE_GENERATOR STREQUAL "NMake Makefiles")
             besktop_mvp_cli
             besktop_action_tests
             besktop_combat_tests
+            besktop_combat_episode_tests
             besktop_combat_director_tests
             besktop_runtime_options_tests
             besktop_awakening_tests
@@ -199,6 +207,8 @@ if(MSVC)
     set_property(TARGET besktop_action_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_combat_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_combat_episode_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_combat_director_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

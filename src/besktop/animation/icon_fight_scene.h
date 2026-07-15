@@ -145,9 +145,11 @@ private:
         CombatScenarioId scenario,
         bool directorInteraction,
         CombatPairState& pairState,
-        double stationLeftX,
-        double stationRightX,
+        double attackerStationX,
+        double defenderStationX,
         double stationY,
+        TurnFacing attackerFacing,
+        TurnFacing defenderFacing,
         CombatPairPhase& loggedPhase,
         double deltaSeconds,
         double actionDeltaSeconds);

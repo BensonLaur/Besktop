@@ -134,6 +134,29 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
         const bool actorsValid = awake(attacker) && awake(defender) &&
             std::isfinite(attacker.x) && std::isfinite(attacker.y) &&
             std::isfinite(defender.x) && std::isfinite(defender.y);
+        const auto configureEpisodeStations = [&](CombatScenarioId scenario) {
+            const CombatPairPlan& plan = GetCombatPairPlan(scenario);
+            const double largestExtent = std::max({
+                48.0,
+                attacker.planeWidth,
+                attacker.planeHeight,
+                defender.planeWidth,
+                defender.planeHeight,
+            });
+            const double halfDistance = largestExtent * plan.desiredAxisDistanceScale * 0.5;
+            active.stationLeftX = std::clamp(
+                active.reservation.centerX - halfDistance,
+                bounds.left + largestExtent * 1.25,
+                bounds.right - largestExtent * 1.25);
+            active.stationRightX = std::clamp(
+                active.reservation.centerX + halfDistance,
+                bounds.left + largestExtent * 1.25,
+                bounds.right - largestExtent * 1.25);
+            active.stationY = std::clamp(
+                active.reservation.centerY,
+                bounds.top + largestExtent * 1.1,
+                bounds.bottom - largestExtent * 1.8);
+        };
         const bool reservationSafe =
             active.reservation.centerX - active.reservation.radius >= bounds.left &&
             active.reservation.centerX + active.reservation.radius <= bounds.right &&
@@ -146,13 +169,61 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
             !attacker.turnMotion.turning && !defender.turnMotion.turning &&
             attacker.turnMotion.currentFacing == TurnFacing::Right &&
             defender.turnMotion.currentFacing == TurnFacing::Left;
-        const bool combatComplete = active.encounter.phase == EncounterPhase::Combat &&
-            active.combatPair.phase == CombatPairPhase::Returning &&
-            active.combatPair.result != CombatResult::None &&
+        const bool actorsRecovered =
             attacker.actionPlayer.State().actionId == ActionId::None &&
             defender.actionPlayer.State().actionId == ActionId::None &&
             attacker.pendingCombatAction == ActionId::None &&
             defender.pendingCombatAction == ActionId::None;
+        const bool pairRecovered = active.encounter.phase == EncounterPhase::Combat &&
+            active.combatEpisode.phase == CombatEpisodePhase::ExchangeActive &&
+            active.combatEpisode.pair.phase == CombatPairPhase::Returning &&
+            active.combatEpisode.pair.result != CombatResult::None && actorsRecovered;
+        CombatEpisodeStep episodeStep;
+        if (active.encounter.phase == EncounterPhase::Combat &&
+            active.combatEpisode.phase != CombatEpisodePhase::Inactive) {
+            episodeStep = UpdateCombatEpisode(
+                active.combatEpisode,
+                {actorsValid, atStations && aligned && actorsRecovered,
+                    pairRecovered, active.combatEpisode.pair.result,
+                    active.finishingNaturally},
+                actionDeltaSeconds);
+            if (episodeStep.exchangeCompleted && !active.combatEpisode.finishAfterRegroup) {
+                configureEpisodeStations(active.combatEpisode.currentScenario);
+            }
+            if (episodeStep.startExchange) {
+                attacker.combatImpactVisible = false;
+                attacker.combatBlockedImpact = false;
+                defender.combatImpactVisible = false;
+                defender.combatBlockedImpact = false;
+                active.loggedCombatPhase = CombatPairPhase::Inactive;
+                LogInfo(
+                    L"combat episode exchange started: encounter=" + std::to_wstring(id) +
+                    L"; exchange=" + std::to_wstring(episodeStep.exchangeIndex) + L"/" +
+                    std::to_wstring(active.combatEpisode.plannedExchangeCount) +
+                    L"; attacker=" + std::to_wstring(
+                        episodeStep.attackerRole == 0 ? attackerIndex : defenderIndex) +
+                    L"; scenario=" + std::wstring(CombatScenarioIdName(episodeStep.scenario)) +
+                    L"; active episodes=" + std::to_wstring(std::count_if(
+                        activeEncounterPool_.encounters.begin(),
+                        activeEncounterPool_.encounters.end(),
+                        [](const ActiveEncounter& value) {
+                            return !value.released && value.encounter.phase == EncounterPhase::Combat &&
+                                !value.combatEpisode.completed;
+                        })));
+            }
+            if (episodeStep.exchangeCompleted) {
+                LogInfo(
+                    L"combat episode exchange completed: encounter=" + std::to_wstring(id) +
+                    L"; exchange=" + std::to_wstring(episodeStep.exchangeIndex) + L"/" +
+                    std::to_wstring(active.combatEpisode.plannedExchangeCount) +
+                    L"; result=" + std::wstring(CombatResultName(episodeStep.exchangeResult)) +
+                    L"; decision=" + (active.combatEpisode.finishAfterRegroup ? L"finish" : L"continue") +
+                    L"; elapsed=" + std::to_wstring(active.combatEpisode.elapsedSeconds));
+            }
+        }
+        const bool combatComplete = active.encounter.phase == EncounterPhase::Combat &&
+            active.combatEpisode.completed;
+        const CombatResult combatResult = active.combatEpisode.finalResult;
         const bool separated = active.encounter.phase == EncounterPhase::Separating &&
             distanceTo(attacker, active.encounter.aftermath.attackerExit.x,
                 active.encounter.aftermath.attackerExit.y) <= 1.5 &&
@@ -161,7 +232,7 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
         const EncounterStep step = UpdateEncounter(
             active.encounter,
             {actorsValid, reservationSafe, atStations, aligned, combatComplete,
-                separated, active.combatPair.result},
+                separated, combatResult, active.combatEpisode.currentAttackerRole == 0},
             actionDeltaSeconds);
 
         if (step.cancelled) {
@@ -243,13 +314,84 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
             break;
         case EncounterPhase::Combat:
             if (step.requestCombatStart) {
-                active.combatPair = {};
+                const std::uint32_t episodeSeed = static_cast<std::uint32_t>(
+                    active.id * 0x9E3779B9u) ^
+                    static_cast<std::uint32_t>((attackerIndex + 1) * 0x85EBCA6Bu) ^
+                    static_cast<std::uint32_t>((defenderIndex + 1) * 0xC2B2AE35u);
+                BeginCombatEpisode(
+                    active.combatEpisode,
+                    episodeSeed,
+                    attacker.behaviorProfile.tendency,
+                    defender.behaviorProfile.tendency,
+                    active.encounter.attackerActsFirst,
+                    active.scenario);
+                configureEpisodeStations(active.combatEpisode.currentScenario);
                 active.loggedCombatPhase = CombatPairPhase::Inactive;
+                const bool episodeAtStations =
+                    distanceTo(attacker, active.stationLeftX, active.stationY) <= 1.5 &&
+                    distanceTo(defender, active.stationRightX, active.stationY) <= 1.5;
+                const bool episodeAligned = episodeAtStations &&
+                    !attacker.turnMotion.turning && !defender.turnMotion.turning &&
+                    attacker.turnMotion.currentFacing == TurnFacing::Right &&
+                    defender.turnMotion.currentFacing == TurnFacing::Left;
+                episodeStep = UpdateCombatEpisode(
+                    active.combatEpisode,
+                    {actorsValid, episodeAligned && actorsRecovered,
+                        false, CombatResult::None, active.finishingNaturally},
+                    0.0);
+                LogInfo(
+                    L"combat episode started: encounter=" + std::to_wstring(id) +
+                    L"; planned exchanges=" +
+                    std::to_wstring(active.combatEpisode.plannedExchangeCount));
+                if (episodeStep.startExchange) {
+                    attacker.combatImpactVisible = false;
+                    attacker.combatBlockedImpact = false;
+                    defender.combatImpactVisible = false;
+                    defender.combatBlockedImpact = false;
+                    LogInfo(
+                        L"combat episode exchange started: encounter=" + std::to_wstring(id) +
+                        L"; exchange=1/" +
+                        std::to_wstring(active.combatEpisode.plannedExchangeCount) +
+                        L"; attacker=" + std::to_wstring(
+                            active.combatEpisode.currentAttackerRole == 0 ?
+                                attackerIndex : defenderIndex) +
+                        L"; scenario=" + std::wstring(CombatScenarioIdName(
+                            active.combatEpisode.currentScenario)) +
+                        L"; active episodes=" + std::to_wstring(std::count_if(
+                            activeEncounterPool_.encounters.begin(),
+                            activeEncounterPool_.encounters.end(),
+                            [](const ActiveEncounter& value) {
+                                return !value.released &&
+                                    value.encounter.phase == EncounterPhase::Combat &&
+                                    !value.combatEpisode.completed;
+                            })));
+                }
             }
-            UpdateCombatPairActors(
-                attackerIndex, defenderIndex, active.scenario, true,
-                active.combatPair, active.stationLeftX, active.stationRightX,
-                active.stationY, active.loggedCombatPhase, deltaSeconds, actionDeltaSeconds);
+            if (active.combatEpisode.phase == CombatEpisodePhase::Ready ||
+                active.combatEpisode.phase == CombatEpisodePhase::Regrouping) {
+                moveTo(attacker, active.stationLeftX, active.stationY, true, true);
+                moveTo(defender, active.stationRightX, active.stationY, true, true);
+                faceEachOther();
+            } else if (active.combatEpisode.phase == CombatEpisodePhase::ExchangeActive) {
+                const bool primaryAttacks = active.combatEpisode.currentAttackerRole == 0;
+                UpdateCombatPairActors(
+                    primaryAttacks ? attackerIndex : defenderIndex,
+                    primaryAttacks ? defenderIndex : attackerIndex,
+                    active.combatEpisode.currentScenario,
+                    true,
+                    active.combatEpisode.pair,
+                    primaryAttacks ? active.stationLeftX : active.stationRightX,
+                    primaryAttacks ? active.stationRightX : active.stationLeftX,
+                    active.stationY,
+                    primaryAttacks ? TurnFacing::Right : TurnFacing::Left,
+                    primaryAttacks ? TurnFacing::Left : TurnFacing::Right,
+                    active.loggedCombatPhase,
+                    deltaSeconds,
+                    actionDeltaSeconds);
+            } else {
+                blendLocomotion(attacker, 0.0);
+                blendLocomotion(defender, 0.0);
+            }
             break;
         case EncounterPhase::Separating:
             if (EncounterActorMayDepart(active.encounter, EncounterActorRole::Attacker)) {
@@ -274,6 +416,18 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
                 L"; intent=" + std::wstring(EncounterIntentName(active.encounter.intent)));
         }
         if (!step.completed) continue;
+
+        if (active.encounter.intent == EncounterIntent::Combat) {
+            LogInfo(
+                L"combat episode completed: encounter=" + std::to_wstring(id) +
+                L"; exchanges=" +
+                std::to_wstring(active.combatEpisode.completedExchangeCount) +
+                L"; elapsed=" + std::to_wstring(active.combatEpisode.elapsedSeconds) +
+                L"; final result=" + std::wstring(CombatResultName(
+                    active.combatEpisode.finalResult)) +
+                L"; reason=" + std::wstring(CombatEpisodeFinishReasonName(
+                    active.combatEpisode.finishReason)));
+        }
 
         ActorEncounterOutcome attackerOutcome = ActorEncounterOutcome::Bluff;
         ActorEncounterOutcome defenderOutcome = ActorEncounterOutcome::Bluff;

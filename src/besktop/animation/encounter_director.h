@@ -78,6 +78,7 @@ struct EncounterReadiness {
     bool combatComplete = false;
     bool separated = false;
     CombatResult combatResult = CombatResult::None;
+    bool combatAttackerIsPrimary = true;
 };
 
 struct EncounterStep {
@@ -143,7 +144,8 @@ EncounterAftermathPlan BuildEncounterAftermathPlan(
     bool attackerActsFirst,
     const EncounterReservation& reservation,
     const EncounterBounds& bounds,
-    double actorMargin);
+    double actorMargin,
+    bool combatAttackerIsPrimary = true);
 
 EncounterPoseSample SampleEncounterPose(
     const EncounterState& state,
