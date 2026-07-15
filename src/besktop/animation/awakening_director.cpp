@@ -99,6 +99,7 @@ namespace besktop {
 
 const AwakeningDirectorTuning& GetAwakeningDirectorTuning()
 {
+    // Product pacing lives in the tuning struct so planning and tests share one source of truth.
     static const AwakeningDirectorTuning tuning{};
     return tuning;
 }

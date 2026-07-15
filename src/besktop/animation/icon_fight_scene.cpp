@@ -1261,9 +1261,11 @@ void DrawActorLabel(
         return;
     }
 
-    const double shake = SmoothStep(0.30, 0.82, elapsedSeconds) * (1.0 - SmoothStep(1.08, 1.48, elapsedSeconds));
-    const double jitterX = std::sin((elapsedSeconds * 66.0) + actor.role) * 5.0 * shake;
-    const double jitterY = std::cos((elapsedSeconds * 73.0) + actor.role) * 3.0 * shake;
+    const double actorTime = std::max(0.0, elapsedSeconds - actor.awakeningStartSeconds);
+    const double shake = SmoothStep(0.02, 0.16, actorTime) *
+        (1.0 - SmoothStep(0.34, kAwakeningDurationSeconds, actorTime));
+    const double jitterX = std::sin((actorTime * 66.0) + actor.role) * 5.0 * shake;
+    const double jitterY = std::cos((actorTime * 73.0) + actor.role) * 3.0 * shake;
     if (cachedLabel != nullptr && cachedLabel->bitmap != nullptr) {
         Gdiplus::ColorMatrix alphaMatrix = {
             1.0f, 0.0f, 0.0f, 0.0f, 0.0f,

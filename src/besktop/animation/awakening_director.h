@@ -59,17 +59,17 @@ struct AwakeningPlanSummary {
 };
 
 struct AwakeningDirectorTuning {
-    double desktopPauseSeconds = 0.65;
-    double firstWaveStartMinimumSeconds = 1.20;
-    double firstWaveStartMaximumSeconds = 3.40;
-    double secondWaveStartMinimumSeconds = 3.60;
-    double secondWaveStartMaximumSeconds = 7.80;
-    double fallbackWaveStartMinimumSeconds = 7.20;
-    double fallbackWaveStartMaximumSeconds = 14.80;
+    double desktopPauseSeconds = 1.00;
+    double firstWaveStartMinimumSeconds = 2.00;
+    double firstWaveStartMaximumSeconds = 9.00;
+    double secondWaveStartMinimumSeconds = 12.00;
+    double secondWaveStartMaximumSeconds = 26.00;
+    double fallbackWaveStartMinimumSeconds = 30.00;
+    double fallbackWaveStartMaximumSeconds = 52.00;
     double proximityCheckIntervalSeconds = 0.15;
     double proximityRadiusScale = 2.70;
-    double proximityDelayMinimumSeconds = 0.45;
-    double proximityDelayMaximumSeconds = 0.85;
+    double proximityDelayMinimumSeconds = 4.00;
+    double proximityDelayMaximumSeconds = 7.00;
 };
 
 struct AwakeningDirectorState {

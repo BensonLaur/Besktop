@@ -71,6 +71,10 @@ void TestWaveRatiosAndFallback()
     Check(state.summary.firstWaveCount + state.summary.secondWaveCount +
         state.summary.fallbackWaveCount == actors.size(), "fallback owns every remaining actor");
     Check(state.summary.fallbackWaveCount > 0, "large plan retains fallback wave");
+    Check(state.summary.firstStartMaximum < state.summary.secondStartMinimum,
+        "first and second waves retain a visible pause");
+    Check(state.summary.secondStartMaximum < state.summary.fallbackStartMinimum,
+        "second and fallback waves retain a visible pause");
 }
 
 void TestSpatialCoverageAndDeterminism()
@@ -139,6 +143,9 @@ void TestProximityAccelerationAndFallback()
     Check(UpdateAwakeningProximity(state, observations, 2.0), "nearby wanderer accelerates sleeper");
     const double acceleratedStart = GetActorAwakeningStartSeconds(state, sleeper->actorIndex);
     Check(acceleratedStart < originalStart, "proximity only moves start earlier");
+    Check(acceleratedStart >= 2.0 + GetAwakeningDirectorTuning().proximityDelayMinimumSeconds &&
+        acceleratedStart <= 2.0 + GetAwakeningDirectorTuning().proximityDelayMaximumSeconds,
+        "proximity keeps a readable causal delay before awakening");
     Check(acceleratedStart >= GetAwakeningDirectorTuning().desktopPauseSeconds,
         "proximity cannot break desktop pause floor");
     const std::size_t accelerationCount = state.proximityAccelerationCount;
