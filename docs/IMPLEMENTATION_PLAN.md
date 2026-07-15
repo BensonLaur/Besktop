@@ -152,7 +152,8 @@ Recovering
 - 第一轮单演员动作库已完成：独立动作 clip/player、统一五阶段、攻击一次性 Contact、可查询防守窗口、每演员动作状态和首演员诊断预览已经接入。16 个公开预览 ID 均使用通用手脚 IK、身体/下半身旋转与 root offset 通道。
 - 固定双演员诊断闭环已接入：前两个演员觉醒后平滑靠近中央安全站位、面对彼此、按共享时间线执行四个固定场景，并以实际拳脚端点、目标身体轴胶囊和防守窗口得出 `Blocked`、`Evaded`、`Whiffed`、`HitLight` 或 `HitHeavy`。该诊断入口仍直接复用 `CombatPair`，不受产品相遇分支影响，也不引入伤害数值或持续自动战斗。
 - 分波觉醒调度已从场景拆到纯逻辑 `AwakeningDirector`：初始化时按稳定种子和原始位置一次性生成约 `20% / 35% / 其余` 的第一批、第二批与兜底批次，时间范围分别约为 `2–9 / 12–26 / 30–52` 秒。第一批使用确定性最远点采样覆盖不同桌面区域；睡眠演员保持静止，只有进入自身觉醒过程的演员才会震动。已完成四肢生长的 Wanderer 可在约 `2.7` 个图标边长内，以稳定 `4–7` 秒因果等待提前附近沉睡演员，避免相邻扩散瞬间压缩为同一波，但所有演员即使未被路过也会由兜底批次唤醒。
-- 受控互动导演已接入首版产品路径：`CombatDirector` 在第一批全部完成四肢生长且至少两名演员正常漫游后，才开始 `6` 秒纯探索缓冲，不再等待全员；随后按距离、参与历史、最近配对和安全空间选择一对并创建工作区内 reservation。独立纯逻辑 `EncounterDirector` 接管“注意—减速接近—面对—观察—意图—结果余波—离场”，观察时间按稳定种子一次性取 `0.6–1.0` 秒，意图权重为约 `60%` Combat、`25%` Yield、`15%` Bluff；只有 Combat 分支复用 `CombatPair` 的共享时间线、真实 Contact 和结果动作，另两种分支不启动 `ActionPlayer`。五种 CombatResult 以及 Yield/Bluff 分别拥有不同停顿、先后离场和 reservation 内安全目标，`HitHeavy` 不重复叠加既有 `HeavyStagger` RootMotion。非参与演员仍用带 `0.85` 秒滞回的切向目标重选绕开 reservation；完成后进入 `14` 秒个人冷却与 `7–11` 秒全局冷却。同一时间最多一对。按 `P` 只关闭或恢复自动互动，不控制觉醒；三种活动分支均自然完成后释放，再次启用先保留 `4` 秒纯漫游。固定诊断预览仍受总开关保护并直接走原 `CombatPair` 路径。
+- 个体驱动相遇基础已接入首版产品路径：每个演员由稳定种子生成 Bold、Timid、Curious、Calm 或 Energetic 主倾向，并在内存中维护警觉、兴奋、体力、最近对象/结果和个体冷却；不读取应用名称、路径、品牌或文件内容，也不持久化。演员只在约 `6.25` 个较大图标边长的局部范围内感知自然接近、视野合适、已觉醒且处于普通漫游的对象，并检查转身、动作、恢复、占用、冷却、工作区边缘和 reservation 空间。`Ignore / Avoid / Observe / Approach / Challenge / Respond / Yield` 意图在 `0.35–0.8` 秒内稳定保持，倾向、临时状态和对方行为只改变权重。双方互相锁定且意图兼容后才提交握手请求，Challenge + Avoid 不会进入正式相遇。
+- 纯逻辑 `EncounterArbiter` 对请求作确定性安全裁决：一个演员只能属于一个接受结果，越界、reservation 重叠或被其他控制器占用的请求被拒绝；仲裁器没有固定并发上限，一轮可接受多个互不冲突请求。当前 `IconFightScene` 仍保留一个 `CombatDirector / EncounterDirector / CombatPair` 活动实例，只消费第一个接受结果，现有“注意—减速接近—面对—观察—Combat/Yield/Bluff—结果余波—离场”流程和五种 CombatResult 余波保持不变。该单实例是迁移限制；下一阶段替换为 `ActiveEncounterPool`，再下一阶段才实现约 `8–16` 秒、`3–7` 次交换的完整交锋段。按 `P` 关闭后不再产生新请求，活动相遇仍自然完成；固定诊断预览仍直接走原 `CombatPair`。
 - 漫游转向已从瞬时 `facing` 翻转改为独立 `TurnMotionState`：当前朝向和目标朝向分离，反向目标先退出步态，再原地完成 `0.40` 秒连续 Y 轴转身，最后提交新朝向并恢复行走。角色根节点、肩部中心和胯部中心组成固定身体中轴；图标中心位于移动方向后方，并按“肢体半径 + 可见净空”与轴分离后绕轴走圆弧。图标薄片、肩胯和四肢共享局部 3D yaw，挂点不再单帧换边，前后层按投影平均深度交换；转身不属于攻击动作，也不发出 Contact。
 - 白色手脚使用两段式骨架：手臂为肩膀、肘、手；腿为胯、膝、脚。
 - 肩膀和胯部位于图标薄片之外的局部 3D 空间，不直接贴在图标平面内。
@@ -229,8 +230,8 @@ Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP
 - `BESKTOP_MAX_ACTORS` 用于限制本次演出的演员数量，便于对比不同图标规模的帧率；未设置或设为 `0` 时保持全部觉醒。
 - `BESKTOP_ACTION_PREVIEW` 支持第一轮全部 16 个公开动作 ID，用于首演员原地循环预览。
 - `BESKTOP_COMBAT_PREVIEW` 支持四个固定双演员场景，推荐配合 `BESKTOP_MAX_ACTORS=2`；普通 Release 未打开诊断总开关时会忽略该变量。固定预览优先级为 Combat、Turn、Action；没有固定预览时进入默认产品 Director。
-- `BESKTOP_COMBAT_DIRECTOR_PREVIEW=1` 显式启用 Director 诊断观测；普通 Release 的低频单对互动本身默认开启。固定 Combat、Turn 和 Action 预览会暂停产品 Director。
-- `CombatDirector` 负责受控配对和空间预约；当前不直接开启全量群架，也没有生命值或胜负。演员不足、空间不足或没有候选时保持纯漫游，不弹出错误。
+- `BESKTOP_COMBAT_DIRECTOR_PREVIEW=1` 显式启用生态相遇诊断观测；普通 Release 的低频互动本身默认开启。固定 Combat、Turn 和 Action 预览会暂停产品路径。
+- 个体感知和双向意图负责提出请求，`EncounterArbiter` 只负责演员占用与空间安全，`CombatDirector` 暂时承接第一个接受请求的单实例节奏和释放。演员不足、意图不兼容、空间不足或没有请求时保持纯漫游，不弹出错误。
 - `BESKTOP_TURN_PREVIEW=1` 用于首演员原地循环左右转身；Debug 可直接使用，Release 只有在 `BESKTOP_ENABLE_DIAGNOSTICS=1` 时才会读取。
 
 新增动作或视觉效果前后必须按 [RENDER_PERFORMANCE.md](RENDER_PERFORMANCE.md) 复测全量演员和小规模对照组，记录稳定帧、动作高峰帧、分阶段耗时和资源稳定性。

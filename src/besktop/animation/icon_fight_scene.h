@@ -9,9 +9,11 @@
 
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/animation/action_player.h"
+#include "besktop/animation/actor_ecosystem.h"
 #include "besktop/animation/awakening_director.h"
 #include "besktop/animation/combat_pair.h"
 #include "besktop/animation/combat_director.h"
+#include "besktop/animation/encounter_arbiter.h"
 #include "besktop/animation/encounter_director.h"
 #include "besktop/animation/turn_motion.h"
 #include "besktop/render/icon_image_cache.h"
@@ -121,6 +123,8 @@ public:
         bool combatBlockedImpact = false;
         ActionPlayer actionPlayer;
         ActionSample actionSample{};
+        ActorBehaviorProfile behaviorProfile{};
+        ActorRuntimeState runtimeState{};
         EncounterPoseSample encounterPose{};
         ActionId pendingCombatAction = ActionId::None;
         ActionSample combatBlendFrom{};
@@ -172,6 +176,10 @@ private:
     CombatDirectorState combatDirectorState_{};
     EncounterState encounterState_{};
     std::vector<CombatDirectorCandidate> combatDirectorCandidates_;
+    std::vector<ActorPerceptionInput> ecosystemPerceptionInputs_;
+    std::vector<ActorRuntimeState> ecosystemRuntimeSnapshots_;
+    std::vector<LocalIntent> ecosystemIntentSnapshot_;
+    std::vector<EncounterArbiterActor> encounterArbiterActors_;
     bool combatDirectorEnabled_ = false;
     bool combatDirectorDiagnosticsEnabled_ = false;
     double combatStationLeftX_ = 0.0;

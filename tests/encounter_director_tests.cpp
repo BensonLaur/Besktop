@@ -97,6 +97,23 @@ void TestIntentIsSampledOnce()
     Check(Near(state.assessDuration, assess), "assess duration is not resampled per frame");
 }
 
+void TestExplicitHandshakeIntent()
+{
+    besktop::EncounterState state;
+    besktop::BeginEncounter(
+        state,
+        71u,
+        kReservation,
+        kBounds,
+        40.0,
+        besktop::EncounterIntent::Yield,
+        true);
+    Check(state.intent == besktop::EncounterIntent::Yield,
+        "handshake-provided intent bypasses global intent sampling");
+    Check(state.attackerActsFirst,
+        "handshake-provided acting side is retained");
+}
+
 void TestOrderedProgressionAndLargeDelta()
 {
     auto yield = BeginForIntent(besktop::EncounterIntent::Yield);
@@ -290,6 +307,7 @@ int main()
 {
     TestDeterministicPlan();
     TestIntentIsSampledOnce();
+    TestExplicitHandshakeIntent();
     TestOrderedProgressionAndLargeDelta();
     TestCombatOnlyRequestsPair();
     TestCombatResultsProduceDistinctSafeAftermath();

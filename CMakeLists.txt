@@ -42,9 +42,11 @@ add_library(besktop_runtime STATIC
 add_library(besktop_animation STATIC
     src/besktop/animation/action_clip.cpp
     src/besktop/animation/action_player.cpp
+    src/besktop/animation/actor_ecosystem.cpp
     src/besktop/animation/awakening_director.cpp
     src/besktop/animation/combat_pair.cpp
     src/besktop/animation/combat_director.cpp
+    src/besktop/animation/encounter_arbiter.cpp
     src/besktop/animation/encounter_director.cpp
     src/besktop/animation/gait_ik.cpp
     src/besktop/animation/turn_motion.cpp
@@ -124,6 +126,11 @@ add_executable(besktop_encounter_tests
 )
 target_link_libraries(besktop_encounter_tests PRIVATE besktop_animation)
 
+add_executable(besktop_ecosystem_tests
+    tests/ecosystem_decision_tests.cpp
+)
+target_link_libraries(besktop_ecosystem_tests PRIVATE besktop_animation)
+
 enable_testing()
 add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 add_test(NAME besktop_combat_tests COMMAND besktop_combat_tests)
@@ -131,6 +138,7 @@ add_test(NAME besktop_combat_director_tests COMMAND besktop_combat_director_test
 add_test(NAME besktop_runtime_options_tests COMMAND besktop_runtime_options_tests)
 add_test(NAME besktop_awakening_tests COMMAND besktop_awakening_tests)
 add_test(NAME besktop_encounter_tests COMMAND besktop_encounter_tests)
+add_test(NAME besktop_ecosystem_tests COMMAND besktop_ecosystem_tests)
 
 foreach(target_name IN ITEMS besktop besktop_mvp_cli)
     target_link_libraries(${target_name} PRIVATE besktop_runtime)
@@ -161,5 +169,7 @@ if(MSVC)
     set_property(TARGET besktop_awakening_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_encounter_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_ecosystem_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()

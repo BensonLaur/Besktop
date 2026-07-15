@@ -1389,6 +1389,10 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     combatDirectorState_ = {};
     encounterState_ = {};
     combatDirectorCandidates_.clear();
+    ecosystemPerceptionInputs_.clear();
+    ecosystemRuntimeSnapshots_.clear();
+    ecosystemIntentSnapshot_.clear();
+    encounterArbiterActors_.clear();
     combatDirectorAvoidanceReplans_ = 0;
     combatDirectorSpaceRejectsLogged_ = 0;
     loggedCombatPhase_ = CombatPairPhase::Inactive;
@@ -1461,6 +1465,8 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
         actor.label = icon.displayName.empty() ? (L"Icon " + std::to_wstring(index + 1)) : icon.displayName;
         actor.randomState = 0x9E3779B9u ^ (static_cast<std::uint32_t>(index + 1) * 0x85EBCA6Bu);
         actor.randomState ^= actor.randomState >> 16;
+        actor.behaviorProfile = GenerateActorBehaviorProfile(actor.randomState ^ 0xD1B54A35u);
+        InitializeActorRuntimeState(actor.runtimeState, actor.randomState ^ 0x94D049BBu);
         TurnFacing initialFacing = turnPreviewEnabled_ && index == 0 ?
             TurnFacing::Right :
             ((actor.randomState & 1u) == 0u ? TurnFacing::Right : TurnFacing::Left);
@@ -1543,6 +1549,10 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     }
     InitializeCombatDirector(combatDirectorState_, combatDirectorEnabled_, actors_.size());
     combatDirectorCandidates_.reserve(actors_.size());
+    ecosystemPerceptionInputs_.reserve(actors_.size());
+    ecosystemRuntimeSnapshots_.reserve(actors_.size());
+    ecosystemIntentSnapshot_.reserve(actors_.size());
+    encounterArbiterActors_.reserve(actors_.size());
     poseCache_.resize(actors_.size());
     renderCache_->bodies.resize(actors_.size());
     renderCache_->limbs.resize(actors_.size());
@@ -1591,14 +1601,24 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     }
     if (combatDirectorEnabled_) {
         const CombatDirectorTuning& tuning = GetCombatDirectorTuning();
+        std::array<std::size_t, 5> tendencyCounts{};
+        for (const IconActor& actor : actors_) {
+            ++tendencyCounts[static_cast<std::size_t>(actor.behaviorProfile.tendency)];
+        }
         LogInfo(
             std::wstring(L"combat director ") +
             (combatDirectorDiagnosticsEnabled_ ? L"diagnostic preview" : L"product mode") +
-            L" enabled; maximum active pairs: 1; opening=" +
+            L" enabled; scene migration active encounters=1; arbiter has no fixed pair cap; opening=" +
             std::to_wstring(tuning.openingWanderSeconds) +
             L"s; global cooldown=" + std::to_wstring(tuning.globalCooldownMinimumSeconds) +
             L"-" + std::to_wstring(tuning.globalCooldownMaximumSeconds) +
             L"s; actor cooldown=" + std::to_wstring(tuning.actorCooldownSeconds) + L"s");
+        LogInfo(
+            L"ecosystem tendencies: bold=" + std::to_wstring(tendencyCounts[0]) +
+            L"; timid=" + std::to_wstring(tendencyCounts[1]) +
+            L"; curious=" + std::to_wstring(tendencyCounts[2]) +
+            L"; calm=" + std::to_wstring(tendencyCounts[3]) +
+            L"; energetic=" + std::to_wstring(tendencyCounts[4]));
     }
     size_t boundActorCount = 0;
     size_t labelBoundsActorCount = 0;
@@ -2202,30 +2222,109 @@ void IconFightScene::UpdateAwakeningSchedule()
 
 void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDeltaSeconds)
 {
-    combatDirectorCandidates_.clear();
-    combatDirectorCandidates_.reserve(actors_.size());
-    for (std::size_t index = 0; index < actors_.size(); ++index) {
-        const IconActor& actor = actors_[index];
-        const double actorTime = elapsedSeconds_ - actor.awakeningStartSeconds;
-        const bool awake = actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
-        combatDirectorCandidates_.push_back(CombatDirectorCandidate{
-            index,
-            actor.x,
-            actor.y,
-            std::max(actor.planeWidth, actor.planeHeight),
-            awake,
-            awake && !actor.actionPreviewActor && !actor.turnPreviewActor && !actor.combatPreviewActor,
-            actor.turnMotion.turning,
-            actor.actionPlayer.State().actionId != ActionId::None,
-        });
-    }
-
     const CombatDirectorBounds bounds{
         static_cast<double>(wanderBounds_.left),
         static_cast<double>(wanderBounds_.top),
         static_cast<double>(wanderBounds_.right),
         static_cast<double>(wanderBounds_.bottom),
     };
+    const EncounterBounds encounterBounds{bounds.left, bounds.top, bounds.right, bounds.bottom};
+
+    combatDirectorCandidates_.clear();
+    ecosystemPerceptionInputs_.clear();
+    ecosystemRuntimeSnapshots_.clear();
+    ecosystemIntentSnapshot_.clear();
+    encounterArbiterActors_.clear();
+    for (std::size_t index = 0; index < actors_.size(); ++index) {
+        IconActor& actor = actors_[index];
+        UpdateActorRuntimeState(actor.runtimeState, actionDeltaSeconds);
+        const double actorTime = elapsedSeconds_ - actor.awakeningStartSeconds;
+        const bool awake = actorTime >= kAwakeningDurationSeconds + kLimbGrowthDurationSeconds;
+        const bool controlled = actor.combatPreviewActor ||
+            CombatDirectorOwnsActor(combatDirectorState_, index);
+        const bool actionActive = actor.actionPlayer.State().actionId != ActionId::None;
+        const bool recovering = actor.pendingCombatAction != ActionId::None ||
+            actor.combatBlendDuration > 0.0;
+        const bool wandering = awake && !actor.actionPreviewActor && !actor.turnPreviewActor &&
+            !actor.combatPreviewActor;
+        double velocityX = 0.0;
+        double velocityY = 0.0;
+        const double targetDx = actor.targetX - actor.x;
+        const double targetDy = actor.targetY - actor.y;
+        const double targetDistance = std::hypot(targetDx, targetDy);
+        if (wandering && !actor.turnMotion.turning && !actionActive && !recovering &&
+            actor.waitRemaining <= 0.0 && targetDistance > 1e-6) {
+            velocityX = targetDx / targetDistance * actor.walkSpeed;
+            velocityY = targetDy / targetDistance * actor.walkSpeed;
+        }
+        ecosystemPerceptionInputs_.push_back(ActorPerceptionInput{
+            index,
+            actor.x,
+            actor.y,
+            velocityX,
+            velocityY,
+            actor.turnMotion.currentFacing == TurnFacing::Right ? 1.0 : -1.0,
+            0.0,
+            std::max(actor.planeWidth, actor.planeHeight),
+            awake,
+            wandering,
+            actor.turnMotion.turning,
+            actionActive,
+            recovering,
+            controlled,
+        });
+        ecosystemIntentSnapshot_.push_back(actor.runtimeState.heldIntent);
+        encounterArbiterActors_.push_back({index, controlled});
+    }
+
+    const bool mayFormNewEncounter = combatDirectorState_.desiredEnabled &&
+        combatDirectorState_.phase != CombatDirectorPhase::Active;
+    // Actor runtime states are embedded in IconActor rather than stored contiguously,
+    // so expose a compact snapshot to the pure decision functions each frame.
+    for (const IconActor& actor : actors_) ecosystemRuntimeSnapshots_.push_back(actor.runtimeState);
+    if (mayFormNewEncounter) {
+        for (std::size_t index = 0; index < actors_.size(); ++index) {
+            const LocalPerception perception = FindLocalPerception(
+                index, ecosystemPerceptionInputs_, ecosystemRuntimeSnapshots_, encounterBounds);
+            const LocalIntent observedIntent = perception.perceived && perception.actorIndex < ecosystemIntentSnapshot_.size() ?
+                ecosystemIntentSnapshot_[perception.actorIndex] : LocalIntent::Ignore;
+            UpdateActorLocalIntent(
+                actors_[index].runtimeState,
+                actors_[index].behaviorProfile,
+                perception,
+                observedIntent,
+                actionDeltaSeconds);
+        }
+        ecosystemRuntimeSnapshots_.clear();
+        for (const IconActor& actor : actors_) ecosystemRuntimeSnapshots_.push_back(actor.runtimeState);
+    }
+
+    const std::vector<LocalEncounterRequest> localRequests = BuildLocalEncounterRequests(
+        ecosystemPerceptionInputs_, ecosystemRuntimeSnapshots_, mayFormNewEncounter);
+    const EncounterArbitrationResult arbitration = ArbitrateEncounterRequests(
+        localRequests, encounterArbiterActors_, encounterBounds);
+    const LocalEncounterRequest* acceptedRequest = arbitration.accepted.empty() ?
+        nullptr : &arbitration.accepted.front();
+    if (acceptedRequest != nullptr) {
+        for (const std::size_t actorIndex : {
+                acceptedRequest->initiatorIndex,
+                acceptedRequest->responderIndex,
+            }) {
+            if (actorIndex >= ecosystemPerceptionInputs_.size()) continue;
+            const ActorPerceptionInput& actor = ecosystemPerceptionInputs_[actorIndex];
+            combatDirectorCandidates_.push_back({
+                actor.actorIndex,
+                actor.x,
+                actor.y,
+                actor.extent,
+                actor.awake,
+                actor.wandering,
+                actor.turning,
+                actor.actionActive || actor.recovering,
+            });
+        }
+    }
+
     const CombatDirectorSelection selection = besktop::UpdateCombatDirector(
         combatDirectorState_,
         combatDirectorCandidates_,
@@ -2257,6 +2356,15 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
             std::max(attacker.planeWidth, attacker.planeHeight) * 0.85,
             std::max(defender.planeWidth, defender.planeHeight) * 0.85,
         });
+        std::optional<bool> attackerLeadsNonCombat;
+        if (acceptedRequest != nullptr) {
+            std::size_t leadingActor = acceptedRequest->initiatorIndex;
+            if (acceptedRequest->encounterIntent == EncounterIntent::Yield) {
+                leadingActor = acceptedRequest->initiatorIntent == LocalIntent::Yield ?
+                    acceptedRequest->initiatorIndex : acceptedRequest->responderIndex;
+            }
+            attackerLeadsNonCombat = leadingActor == selection.attackerIndex;
+        }
         BeginEncounter(
             encounterState_,
             combatDirectorState_.randomState ^
@@ -2273,7 +2381,15 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
                 bounds.right,
                 bounds.bottom,
             },
-            actorMargin);
+            actorMargin,
+            acceptedRequest != nullptr ? acceptedRequest->encounterIntent : EncounterIntent::Undecided,
+            attackerLeadsNonCombat);
+        encounterState_.assessDuration = std::clamp(
+            encounterState_.assessDuration +
+                (ActorAssessDurationAdjustment(attacker.behaviorProfile.tendency) +
+                    ActorAssessDurationAdjustment(defender.behaviorProfile.tendency)) * 0.5,
+            0.52,
+            1.08);
         loggedEncounterPhase_ = encounterState_.phase;
         LogInfo(
             L"encounter started: actors=" +
@@ -2282,8 +2398,8 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
             L"; scenario=" + std::wstring(CombatScenarioIdName(selection.scenario)) +
             L"; intent=" + std::wstring(EncounterIntentName(encounterState_.intent)) +
             L"; assess=" + std::to_wstring(encounterState_.assessDuration) + L"s" +
-            L"; eligible actors=" + std::to_wstring(selection.eligibleActorCount) +
-            L"; eligible pairs=" + std::to_wstring(selection.eligiblePairCount) +
+            L"; local requests=" + std::to_wstring(localRequests.size()) +
+            L"; arbiter accepted=" + std::to_wstring(arbitration.accepted.size()) +
             L"; space rejected since last round=" + std::to_wstring(rejectedSinceLastRound) +
             L"; reservation=" + std::to_wstring(selection.reservation.centerX) + L"," +
             std::to_wstring(selection.reservation.centerY) + L" r=" +
@@ -2504,6 +2620,24 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
     }
     if (!encounterStep.completed) return;
 
+    const EncounterIntent completedIntent = encounterState_.intent;
+    ActorEncounterOutcome attackerOutcome = ActorEncounterOutcome::Bluff;
+    ActorEncounterOutcome defenderOutcome = ActorEncounterOutcome::Bluff;
+    if (completedIntent == EncounterIntent::Combat) {
+        attackerOutcome = ActorEncounterOutcome::Combat;
+        defenderOutcome = ActorEncounterOutcome::Combat;
+    } else if (completedIntent == EncounterIntent::Yield) {
+        const bool attackerYielded = encounterState_.attackerActsFirst;
+        attackerOutcome = attackerYielded ?
+            ActorEncounterOutcome::Yielded : ActorEncounterOutcome::CounterpartYielded;
+        defenderOutcome = attackerYielded ?
+            ActorEncounterOutcome::CounterpartYielded : ActorEncounterOutcome::Yielded;
+    }
+    const CombatDirectorTuning& tuning = GetCombatDirectorTuning();
+    const double actorCooldown = tuning.actorCooldownSeconds +
+        (actors_.size() <= 6 ? tuning.sparseActorCooldownBonusSeconds : 0.0);
+    RecordActorEncounter(attacker.runtimeState, defenderIndex, attackerOutcome, actorCooldown);
+    RecordActorEncounter(defender.runtimeState, attackerIndex, defenderOutcome, actorCooldown);
     clearControlledActor(attacker);
     clearControlledActor(defender);
     CompleteCombatDirectorInteraction(combatDirectorState_);

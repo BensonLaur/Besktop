@@ -109,7 +109,9 @@ void BeginEncounter(
     std::uint32_t seed,
     const EncounterReservation& reservation,
     const EncounterBounds& bounds,
-    double actorMargin)
+    double actorMargin,
+    EncounterIntent resolvedIntent,
+    std::optional<bool> attackerActsFirst)
 {
     state = {};
     state.phase = EncounterPhase::Notice;
@@ -117,8 +119,9 @@ void BeginEncounter(
     state.reservation = reservation;
     state.bounds = bounds;
     state.actorMargin = std::max(0.0, actorMargin);
-    state.intent = ChooseIntent(state.randomState);
-    state.attackerActsFirst = NextUnit(state.randomState) < 0.5;
+    state.intent = resolvedIntent == EncounterIntent::Undecided ?
+        ChooseIntent(state.randomState) : resolvedIntent;
+    state.attackerActsFirst = attackerActsFirst.value_or(NextUnit(state.randomState) < 0.5);
     const EncounterTuning& tuning = GetEncounterTuning();
     state.assessDuration = tuning.assessMinimumSeconds + NextUnit(state.randomState) *
         (tuning.assessMaximumSeconds - tuning.assessMinimumSeconds);

@@ -3,6 +3,7 @@
 #include "besktop/animation/combat_pair.h"
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace besktop {
@@ -125,7 +126,9 @@ void BeginEncounter(
     std::uint32_t seed,
     const EncounterReservation& reservation,
     const EncounterBounds& bounds,
-    double actorMargin);
+    double actorMargin,
+    EncounterIntent resolvedIntent = EncounterIntent::Undecided,
+    std::optional<bool> attackerActsFirst = std::nullopt);
 
 EncounterStep UpdateEncounter(
     EncounterState& state,
