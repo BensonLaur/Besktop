@@ -246,7 +246,9 @@ void TestRuntimeModeToggle()
     Check(state.phase == CombatDirectorPhase::Idle && state.desiredEnabled &&
         state.openingWanderRemaining == GetCombatDirectorTuning().resumeWanderSeconds,
         "reenable applies natural wandering buffer");
-    Check(!UpdateCombatDirector(state, candidates, bounds, 3.5).started,
+    Check(!UpdateCombatDirector(
+            state, candidates, bounds,
+            GetCombatDirectorTuning().resumeWanderSeconds - 0.5).started,
         "resume buffer prevents immediate interaction");
     Check(UpdateCombatDirector(state, candidates, bounds, 0.5).started,
         "interaction can resume after buffer");

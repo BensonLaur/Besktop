@@ -71,6 +71,11 @@ void TestStableTendencies()
 void TestIntentWindowAndRuntimeDecay()
 {
     using namespace besktop;
+    const ActorEcosystemTuning& tuning = GetActorEcosystemTuning();
+    Check(tuning.intentMinimumSeconds >= 0.35 && tuning.intentMaximumSeconds <= 0.80,
+        "intent decision window is maintained in one tuning source");
+    Check(tuning.perceptionMaximumDistanceScale > tuning.stationaryPerceptionDistanceScale,
+        "naturally approaching actors can be noticed farther than stationary actors");
     ActorRuntimeState state;
     InitializeActorRuntimeState(state, 42u);
     const ActorBehaviorProfile profile = GenerateActorBehaviorProfile(42u);

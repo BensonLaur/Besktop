@@ -290,9 +290,12 @@ CombatEpisodeStep UpdateCombatEpisode(
         } else {
             PrepareNextExchange(state, false);
         }
-        state.regroupRemainingSeconds = tuning.regroupMinimumSeconds +
-            NextUnit(state.randomState) *
-                (tuning.regroupMaximumSeconds - tuning.regroupMinimumSeconds);
+        const double regroupMinimum = finish ?
+            tuning.finalSettleMinimumSeconds : tuning.regroupMinimumSeconds;
+        const double regroupMaximum = finish ?
+            tuning.finalSettleMaximumSeconds : tuning.regroupMaximumSeconds;
+        state.regroupRemainingSeconds = regroupMinimum +
+            NextUnit(state.randomState) * (regroupMaximum - regroupMinimum);
         state.phase = CombatEpisodePhase::Regrouping;
         step.finishReason = state.finishReason;
         return step;

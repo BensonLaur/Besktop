@@ -7,11 +7,6 @@
 
 namespace {
 
-constexpr double kReactionReselectSeconds = 0.70;
-constexpr double kReactionCooldownMinimumSeconds = 3.0;
-constexpr double kReactionCooldownMaximumSeconds = 6.0;
-constexpr double kReactionRecoverySeconds = 0.35;
-
 std::uint32_t MixSeed(std::uint32_t value)
 {
     value ^= value >> 16;
@@ -60,7 +55,10 @@ double EventScore(
     const double dy = event.center.y - actor.y;
     const double distance = std::hypot(dx, dy);
     const double extent = std::max(24.0, actor.extent);
-    const double maximumDistance = event.reservation.radius + extent * (3.0 + event.salience * 2.4);
+    const besktop::ActorEventReactionTuning& tuning =
+        besktop::GetActorEventReactionTuning();
+    const double maximumDistance = event.reservation.radius + extent *
+        (tuning.eventDistanceBaseScale + event.salience * tuning.eventDistanceSalienceScale);
     if (!std::isfinite(distance) || distance > maximumDistance) return -1.0;
 
     double viewX = actor.velocityX;
@@ -190,11 +188,12 @@ void BeginRecovering(
     besktop::ActorEventReactionStep& step)
 {
     state.kind = besktop::ActorEventReactionKind::Recovering;
-    state.remainingSeconds = kReactionRecoverySeconds;
+    state.remainingSeconds = besktop::GetActorEventReactionTuning().recoverySeconds;
     state.targetValid = false;
     state.keepMoving = true;
     state.individualCooldownRemaining = std::max(
-        state.individualCooldownRemaining, 2.5);
+        state.individualCooldownRemaining,
+        besktop::GetActorEventReactionTuning().recoveryCooldownMinimumSeconds);
     state.finishReason = reason;
     step.changed = true;
     step.finished = true;
@@ -204,6 +203,12 @@ void BeginRecovering(
 } // namespace
 
 namespace besktop {
+
+const ActorEventReactionTuning& GetActorEventReactionTuning()
+{
+    static const ActorEventReactionTuning tuning{};
+    return tuning;
+}
 
 std::wstring_view ActorEventReactionKindName(ActorEventReactionKind kind)
 {
@@ -241,28 +246,33 @@ double ComputeEncounterEventSalience(
     CombatResult result,
     bool contactOccurred)
 {
+    const ActorEventReactionTuning& tuning = GetActorEventReactionTuning();
     double salience = 0.0;
     switch (phase) {
-    case EncounterPhase::Assessing: salience = 0.22; break;
-    case EncounterPhase::Intent: salience = 0.34; break;
-    case EncounterPhase::Combat: salience = combatEpisodeActive ? 0.55 : 0.46; break;
-    case EncounterPhase::Aftermath: salience = 0.40; break;
-    case EncounterPhase::Separating: salience = 0.22; break;
+    case EncounterPhase::Assessing: salience = tuning.assessSalience; break;
+    case EncounterPhase::Intent: salience = tuning.intentSalience; break;
+    case EncounterPhase::Combat:
+        salience = combatEpisodeActive ?
+            tuning.combatEpisodeSalience : tuning.combatSalience;
+        break;
+    case EncounterPhase::Aftermath: salience = tuning.aftermathSalience; break;
+    case EncounterPhase::Separating: salience = tuning.separatingSalience; break;
     default: break;
     }
     if (contactOccurred) {
         switch (result) {
-        case CombatResult::HitHeavy: salience = 1.0; break;
-        case CombatResult::HitLight: salience = 0.82; break;
+        case CombatResult::HitHeavy: salience = tuning.heavyContactSalience; break;
+        case CombatResult::HitLight: salience = tuning.lightContactSalience; break;
         case CombatResult::Blocked:
         case CombatResult::Evaded:
-        case CombatResult::Whiffed: salience = 0.66; break;
-        default: salience = std::max(salience, 0.58); break;
+        case CombatResult::Whiffed: salience = tuning.defensiveContactSalience; break;
+        default: salience = std::max(salience, tuning.genericContactSalience); break;
         }
     } else if (phase == EncounterPhase::Aftermath) {
         salience = std::max(salience,
-            result == CombatResult::HitHeavy ? 0.72 :
-            result == CombatResult::HitLight ? 0.58 : 0.44);
+            result == CombatResult::HitHeavy ? tuning.heavyAftermathSalience :
+            result == CombatResult::HitLight ? tuning.lightAftermathSalience :
+                tuning.otherAftermathSalience);
     }
     return salience;
 }
@@ -300,6 +310,7 @@ ActorEventReactionBatchStats UpdateActorEventReactions(
     if (actors.size() != states.size() || actors.size() != steps.size()) return stats;
     const double delta = std::isfinite(deltaSeconds) && deltaSeconds > 0.0 ?
         std::min(deltaSeconds, 1.0) : 0.0;
+    const ActorEventReactionTuning& tuning = GetActorEventReactionTuning();
     std::fill(steps.begin(), steps.end(), ActorEventReactionStep{});
 
     for (std::size_t index = 0; index < actors.size(); ++index) {
@@ -353,12 +364,13 @@ ActorEventReactionBatchStats UpdateActorEventReactions(
             const bool travellingToObservation =
                 state.kind == ActorEventReactionKind::Observing && state.targetValid &&
                 std::hypot(actor.x - state.target.x, actor.y - state.target.y) >
-                    std::max(8.0, actor.extent * 0.22) && state.elapsedSeconds < 4.0;
+                    std::max(8.0, actor.extent * 0.22) &&
+                state.elapsedSeconds < tuning.maximumObservationTravelSeconds;
             if (!travellingToObservation) {
                 state.remainingSeconds = std::max(0.0, state.remainingSeconds - delta);
             }
             if (focused->ending || state.remainingSeconds <= 0.0 ||
-                state.elapsedSeconds >= 6.0) {
+                state.elapsedSeconds >= tuning.maximumReactionSeconds) {
                 BeginRecovering(state,
                     focused->ending ? ActorEventReactionFinishReason::EventEnded :
                         ActorEventReactionFinishReason::Completed,
@@ -372,7 +384,9 @@ ActorEventReactionBatchStats UpdateActorEventReactions(
             continue;
         }
         if (state.reselectCooldownRemaining > 0.0) continue;
-        state.reselectCooldownRemaining = 0.35 + NextUnit(state.randomState) * 0.45;
+        state.reselectCooldownRemaining = tuning.selectionMinimumSeconds +
+            NextUnit(state.randomState) *
+                (tuning.selectionMaximumSeconds - tuning.selectionMinimumSeconds);
 
         const EncounterEventSnapshot* selected = nullptr;
         double selectedScore = -1.0;
@@ -412,14 +426,19 @@ ActorEventReactionBatchStats UpdateActorEventReactions(
                     std::hypot(other.x - selected->center.x, other.y - selected->center.y) <
                         selected->reservation.radius + extent * 2.4;
             }));
-        probability -= std::min(0.24, static_cast<double>(nearbyActors) * 0.025);
+        probability -= std::min(
+            tuning.nearbyDensityPenaltyMaximum,
+            static_cast<double>(nearbyActors) * tuning.nearbyDensityPenalty);
         const std::size_t currentEventReactions = static_cast<std::size_t>(std::count_if(
             states.begin(), states.end(), [&](const auto& otherState) {
                 return otherState.encounterId == selected->encounterId &&
                     otherState.kind != ActorEventReactionKind::None &&
                     otherState.kind != ActorEventReactionKind::Recovering;
             }));
-        probability -= std::min(0.54, static_cast<double>(currentEventReactions) * 0.16);
+        probability -= std::min(
+            tuning.sameEventReactionPenaltyMaximum,
+            static_cast<double>(currentEventReactions) * tuning.sameEventReactionPenalty);
+        probability *= tuning.reactionProbabilityScale;
         if (NextUnit(state.randomState) > std::clamp(probability, 0.04, 0.92)) continue;
 
         ActorEventReactionKind kind = ActorEventReactionKind::Glancing;
@@ -437,7 +456,7 @@ ActorEventReactionBatchStats UpdateActorEventReactions(
         state.eventCenter = selected->center;
         state.elapsedSeconds = 0.0;
         state.intensity = selected->salience;
-        state.reselectCooldownRemaining = kReactionReselectSeconds;
+        state.reselectCooldownRemaining = tuning.focusReselectSeconds;
         state.lastContactSequence = selected->contactOccurred ? selected->exchangeIndex : 0;
         state.reactedToCurrentEvent = true;
         state.finishReason = ActorEventReactionFinishReason::None;
@@ -445,12 +464,15 @@ ActorEventReactionBatchStats UpdateActorEventReactions(
         state.targetValid = false;
 
         if (kind == ActorEventReactionKind::Observing) {
-            const double distanceScale = actor.tendency == ActorTendency::Bold ? 1.00 : 1.35;
+            const double distanceScale = actor.tendency == ActorTendency::Bold ?
+                tuning.boldObservationDistanceScale : tuning.curiousObservationDistanceScale;
             if (FindObservationPoint(
                     actor, *selected, reservations, states, bounds,
                     distanceScale, &state.target)) {
                 state.targetValid = true;
-                state.remainingSeconds = 1.2 + NextUnit(state.randomState) * 1.8;
+                state.remainingSeconds = tuning.observationMinimumSeconds +
+                    NextUnit(state.randomState) *
+                        (tuning.observationMaximumSeconds - tuning.observationMinimumSeconds);
                 step.targetChanged = true;
             } else {
                 state.kind = ActorEventReactionKind::Glancing;
@@ -463,16 +485,19 @@ ActorEventReactionBatchStats UpdateActorEventReactions(
             state.target = BuildAvoidanceTarget(actor, *selected, bounds);
             state.targetValid = true;
             state.keepMoving = true;
-            state.remainingSeconds = 1.2 + NextUnit(state.randomState) * 1.1;
+            state.remainingSeconds = tuning.avoidanceMinimumSeconds +
+                NextUnit(state.randomState) *
+                    (tuning.avoidanceMaximumSeconds - tuning.avoidanceMinimumSeconds);
             step.targetChanged = true;
         } else {
             state.remainingSeconds = 0.45 + NextUnit(state.randomState) *
                 (actor.tendency == ActorTendency::Calm ? 0.45 : 0.75);
         }
 
-        state.individualCooldownRemaining = kReactionCooldownMinimumSeconds +
+        state.individualCooldownRemaining = tuning.individualCooldownMinimumSeconds +
             NextUnit(state.randomState) *
-                (kReactionCooldownMaximumSeconds - kReactionCooldownMinimumSeconds);
+                (tuning.individualCooldownMaximumSeconds -
+                    tuning.individualCooldownMinimumSeconds);
         step.started = true;
         step.changed = true;
     }

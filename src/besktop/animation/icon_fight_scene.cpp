@@ -17,7 +17,7 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kAwakeningDurationSeconds = 0.48;
 constexpr double kLimbGrowthDurationSeconds = 0.72;
-constexpr ULONGLONG kAutomaticInteractionToastMilliseconds = 1600;
+constexpr ULONGLONG kAutomaticInteractionToastMilliseconds = 1400;
 
 LONGLONG PerformanceCounterNow()
 {
@@ -1355,8 +1355,7 @@ bool IconFightScene::ToggleAutomaticInteractions()
     const bool enabled = !activeEncounterPool_.desiredEnabled;
     SetActiveEncounterPoolEnabled(activeEncounterPool_, enabled);
     automaticInteractionToast_ = enabled ?
-        L"\u81ea\u52a8\u4e92\u52a8\uff1a\u5df2\u5f00\u542f" :
-        L"\u81ea\u52a8\u4e92\u52a8\uff1a\u5df2\u5173\u95ed\uff0c\u4ec5\u81ea\u7531\u6f2b\u6e38";
+        L"\u81ea\u52a8\u4e92\u52a8\uff1a\u5f00" : L"\u81ea\u52a8\u4e92\u52a8\uff1a\u5173\uff08\u4ec5\u6f2b\u6e38\uff09";
     automaticInteractionToastStartTick_ = GetTickCount64();
     return true;
 }

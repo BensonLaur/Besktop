@@ -96,6 +96,21 @@ struct LocalEncounterRequest {
     double priority = 0.0;
 };
 
+struct ActorEcosystemTuning {
+    double intentMinimumSeconds = 0.35;
+    double intentMaximumSeconds = 0.80;
+    double recentEncounterMemorySeconds = 28.0;
+    double perceptionMinimumDistanceScale = 1.80;
+    double perceptionMaximumDistanceScale = 6.25;
+    double stationaryPerceptionDistanceScale = 3.65;
+    double reservationRadiusScale = 2.35;
+    double alertnessDecayPerSecond = 0.10;
+    double agitationDecayPerSecond = 0.08;
+    double staminaRecoveryPerSecond = 0.055;
+};
+
+const ActorEcosystemTuning& GetActorEcosystemTuning();
+
 std::wstring_view ActorTendencyName(ActorTendency tendency);
 std::wstring_view LocalIntentName(LocalIntent intent);
 

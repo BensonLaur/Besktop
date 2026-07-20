@@ -34,21 +34,28 @@ double NormalizedDistanceSquared(
     return dx * dx + dy * dy;
 }
 
-std::size_t FirstWaveCount(std::size_t actorCount)
+std::size_t FirstWaveCount(
+    std::size_t actorCount,
+    const besktop::AwakeningDirectorTuning& tuning)
 {
     if (actorCount == 0) return 0;
     if (actorCount == 1) return 1;
     const std::size_t proportional = static_cast<std::size_t>(
-        std::llround(static_cast<double>(actorCount) * 0.20));
-    return std::min(actorCount, std::max<std::size_t>(2, proportional));
+        std::llround(static_cast<double>(actorCount) * tuning.firstWaveRatio));
+    return std::min(actorCount, std::max(tuning.firstWaveMinimumCount, proportional));
 }
 
-std::size_t SecondWaveCount(std::size_t actorCount, std::size_t firstWaveCount)
+std::size_t SecondWaveCount(
+    std::size_t actorCount,
+    std::size_t firstWaveCount,
+    const besktop::AwakeningDirectorTuning& tuning)
 {
     if (actorCount <= firstWaveCount) return 0;
     const std::size_t proportional = static_cast<std::size_t>(
-        std::llround(static_cast<double>(actorCount) * 0.35));
-    return std::min(actorCount - firstWaveCount, std::max<std::size_t>(1, proportional));
+        std::llround(static_cast<double>(actorCount) * tuning.secondWaveRatio));
+    return std::min(
+        actorCount - firstWaveCount,
+        std::max(tuning.secondWaveMinimumCount, proportional));
 }
 
 void AssignWaveTimes(
@@ -132,8 +139,9 @@ void InitializeAwakeningDirector(
                 (tuning.proximityDelayMaximumSeconds - tuning.proximityDelayMinimumSeconds);
     }
 
-    const std::size_t firstCount = FirstWaveCount(actors.size());
-    const std::size_t secondCount = SecondWaveCount(actors.size(), firstCount);
+    const AwakeningDirectorTuning& tuning = GetAwakeningDirectorTuning();
+    const std::size_t firstCount = FirstWaveCount(actors.size(), tuning);
+    const std::size_t secondCount = SecondWaveCount(actors.size(), firstCount, tuning);
     std::vector<bool> firstSelected(actors.size(), false);
     std::vector<std::size_t> firstIndices;
     firstIndices.reserve(firstCount);
@@ -193,7 +201,6 @@ void InitializeAwakeningDirector(
             rank < secondCount ? AwakeningWave::Second : AwakeningWave::Fallback;
     }
 
-    const AwakeningDirectorTuning& tuning = GetAwakeningDirectorTuning();
     AssignWaveTimes(
         state.entries, AwakeningWave::First,
         tuning.firstWaveStartMinimumSeconds, tuning.firstWaveStartMaximumSeconds, 0x082EFA98u);

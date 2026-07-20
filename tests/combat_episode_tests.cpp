@@ -197,6 +197,11 @@ void TestStopTimeoutAndLargeDelta()
         "P waits for the current pair instead of cutting it");
     UpdateCombatEpisode(
         stopped, {true, true, true, CombatResult::Blocked, true}, 0.0);
+    const CombatEpisodeTuning& tuning = GetCombatEpisodeTuning();
+    Check(stopped.regroupRemainingSeconds >= tuning.finalSettleMinimumSeconds &&
+            stopped.regroupRemainingSeconds <= tuning.finalSettleMaximumSeconds &&
+            stopped.regroupRemainingSeconds < tuning.regroupMinimumSeconds,
+        "final exchange uses a short settle instead of a duplicate full regroup wait");
     const CombatEpisodeStep stoppedDone = UpdateCombatEpisode(stopped, {true, true}, 8.0);
     Check(stoppedDone.episodeCompleted &&
         stopped.finishReason == CombatEpisodeFinishReason::StopRequested,

@@ -33,6 +33,8 @@ struct CombatEpisodeTuning {
     std::size_t maximumExchangeCount = 7;
     double regroupMinimumSeconds = 0.30;
     double regroupMaximumSeconds = 0.80;
+    double finalSettleMinimumSeconds = 0.14;
+    double finalSettleMaximumSeconds = 0.28;
     double hardTimeoutSeconds = 20.0;
 };
 

@@ -72,7 +72,7 @@ struct CombatDirectorTuning {
     double sparseActorCooldownBonusSeconds = 4.0;
     double avoidanceReplanIntervalSeconds = 0.85;
     double avoidanceHysteresisScale = 0.28;
-    double resumeWanderSeconds = 4.0;
+    double resumeWanderSeconds = 5.0;
 };
 
 struct CombatAvoidanceRequest {

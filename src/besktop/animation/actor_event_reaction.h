@@ -100,6 +100,46 @@ struct ActorEventReactionBatchStats {
     std::size_t unsafeObservationPointRejectionCount = 0;
 };
 
+struct ActorEventReactionTuning {
+    double selectionMinimumSeconds = 0.45;
+    double selectionMaximumSeconds = 0.90;
+    double focusReselectSeconds = 0.80;
+    double individualCooldownMinimumSeconds = 5.0;
+    double individualCooldownMaximumSeconds = 9.0;
+    double recoverySeconds = 0.55;
+    double recoveryCooldownMinimumSeconds = 3.0;
+    double maximumReactionSeconds = 5.5;
+    double maximumObservationTravelSeconds = 4.0;
+    double assessSalience = 0.22;
+    double intentSalience = 0.34;
+    double combatSalience = 0.46;
+    double combatEpisodeSalience = 0.55;
+    double aftermathSalience = 0.40;
+    double separatingSalience = 0.22;
+    double heavyContactSalience = 1.0;
+    double lightContactSalience = 0.82;
+    double defensiveContactSalience = 0.66;
+    double genericContactSalience = 0.58;
+    double heavyAftermathSalience = 0.72;
+    double lightAftermathSalience = 0.58;
+    double otherAftermathSalience = 0.44;
+    double eventDistanceBaseScale = 2.80;
+    double eventDistanceSalienceScale = 1.90;
+    double nearbyDensityPenalty = 0.035;
+    double nearbyDensityPenaltyMaximum = 0.30;
+    double sameEventReactionPenalty = 0.22;
+    double sameEventReactionPenaltyMaximum = 0.72;
+    double reactionProbabilityScale = 0.88;
+    double boldObservationDistanceScale = 1.05;
+    double curiousObservationDistanceScale = 1.38;
+    double observationMinimumSeconds = 1.30;
+    double observationMaximumSeconds = 2.50;
+    double avoidanceMinimumSeconds = 1.20;
+    double avoidanceMaximumSeconds = 2.20;
+};
+
+const ActorEventReactionTuning& GetActorEventReactionTuning();
+
 std::wstring_view ActorEventReactionKindName(ActorEventReactionKind kind);
 std::wstring_view ActorEventReactionFinishReasonName(ActorEventReactionFinishReason reason);
 

@@ -59,6 +59,10 @@ struct AwakeningPlanSummary {
 };
 
 struct AwakeningDirectorTuning {
+    double firstWaveRatio = 0.20;
+    double secondWaveRatio = 0.35;
+    std::size_t firstWaveMinimumCount = 2;
+    std::size_t secondWaveMinimumCount = 1;
     double desktopPauseSeconds = 1.00;
     double firstWaveStartMinimumSeconds = 2.00;
     double firstWaveStartMaximumSeconds = 9.00;

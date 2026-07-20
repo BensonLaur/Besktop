@@ -193,6 +193,13 @@ void TestEcosystemReadiness()
 
 int main()
 {
+    const auto& tuning = besktop::GetAwakeningDirectorTuning();
+    Check(std::abs(tuning.firstWaveRatio - 0.20) < 1e-9 &&
+            std::abs(tuning.secondWaveRatio - 0.35) < 1e-9,
+        "release wave ratios stay centralized and deliberately sparse");
+    Check(tuning.firstWaveStartMaximumSeconds < tuning.secondWaveStartMinimumSeconds &&
+            tuning.secondWaveStartMaximumSeconds < tuning.fallbackWaveStartMinimumSeconds,
+        "release awakening waves remain visibly separated");
     TestEmptyAndSmallPlans();
     TestWaveRatiosAndFallback();
     TestSpatialCoverageAndDeterminism();

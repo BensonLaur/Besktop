@@ -133,6 +133,12 @@ void TestDeterminismAndAvailability()
 
 void TestTendencyDifferences()
 {
+    const auto& tuning = besktop::GetActorEventReactionTuning();
+    Expect(tuning.sameEventReactionPenalty > tuning.nearbyDensityPenalty,
+        "same-event crowding is suppressed more strongly than ordinary local density");
+    Expect(tuning.individualCooldownMinimumSeconds >= 5.0 &&
+        tuning.reactionProbabilityScale < 1.0,
+        "background reactions keep a restrained probability and recovery cadence");
     int curiousObserves = 0;
     int calmObserves = 0;
     int timidAvoids = 0;

@@ -6,10 +6,6 @@
 
 namespace {
 
-constexpr double kIntentMinimumSeconds = 0.35;
-constexpr double kIntentMaximumSeconds = 0.80;
-constexpr double kRecentEncounterMemorySeconds = 28.0;
-
 std::uint32_t MixSeed(std::uint32_t value)
 {
     value ^= value >> 16;
@@ -61,6 +57,12 @@ std::size_t IntentIndex(besktop::LocalIntent intent)
 } // namespace
 
 namespace besktop {
+
+const ActorEcosystemTuning& GetActorEcosystemTuning()
+{
+    static const ActorEcosystemTuning tuning{};
+    return tuning;
+}
 
 std::wstring_view ActorTendencyName(ActorTendency tendency)
 {
@@ -116,9 +118,13 @@ void UpdateActorRuntimeState(ActorRuntimeState& state, double deltaSeconds)
 {
     if (!std::isfinite(deltaSeconds) || deltaSeconds <= 0.0) return;
     const double delta = std::min(deltaSeconds, 60.0);
-    state.alertness = std::max(0.0, state.alertness - delta * 0.10);
-    state.agitation = std::max(0.0, state.agitation - delta * 0.08);
-    state.stamina = std::min(1.0, state.stamina + delta * 0.055);
+    const ActorEcosystemTuning& tuning = GetActorEcosystemTuning();
+    state.alertness = std::max(
+        0.0, state.alertness - delta * tuning.alertnessDecayPerSecond);
+    state.agitation = std::max(
+        0.0, state.agitation - delta * tuning.agitationDecayPerSecond);
+    state.stamina = std::min(
+        1.0, state.stamina + delta * tuning.staminaRecoveryPerSecond);
     state.encounterCooldownRemaining = std::max(0.0, state.encounterCooldownRemaining - delta);
     state.recentEncounterMemoryRemaining = std::max(0.0, state.recentEncounterMemoryRemaining - delta);
 }
@@ -137,6 +143,7 @@ LocalPerception FindLocalPerception(
     }
 
     const ActorPerceptionInput& self = actors[selfIndex];
+    const ActorEcosystemTuning& tuning = GetActorEcosystemTuning();
     for (std::size_t otherIndex = 0; otherIndex < actors.size(); ++otherIndex) {
         if (otherIndex == selfIndex || !IsAvailable(actors[otherIndex], runtimeStates[otherIndex])) continue;
         const ActorPerceptionInput& other = actors[otherIndex];
@@ -144,17 +151,18 @@ LocalPerception FindLocalPerception(
         const double dx = other.x - self.x;
         const double dy = other.y - self.y;
         const double distance = std::hypot(dx, dy);
-        if (distance < extent * 1.80 || distance > extent * 6.25) continue;
+        if (distance < extent * tuning.perceptionMinimumDistanceScale ||
+            distance > extent * tuning.perceptionMaximumDistanceScale) continue;
 
         const double centerX = (self.x + other.x) * 0.5;
         const double centerY = (self.y + other.y) * 0.5;
-        const double reservationRadius = extent * 2.35;
+        const double reservationRadius = extent * tuning.reservationRadiusScale;
         if (!ReservationFits(bounds, centerX, centerY, reservationRadius)) continue;
 
         const double relativeVelocityX = other.velocityX - self.velocityX;
         const double relativeVelocityY = other.velocityY - self.velocityY;
         const bool approaching = dx * relativeVelocityX + dy * relativeVelocityY < -extent * 1.5;
-        if (!approaching && distance > extent * 3.65) continue;
+        if (!approaching && distance > extent * tuning.stationaryPerceptionDistanceScale) continue;
 
         double viewX = self.velocityX;
         double viewY = self.velocityY;
@@ -197,8 +205,10 @@ bool UpdateActorLocalIntent(
 
     const LocalIntent previousIntent = state.heldIntent;
     const std::size_t previousTarget = state.intentTargetActor;
-    state.intentDecisionRemaining = kIntentMinimumSeconds +
-        NextUnit(state.randomState) * (kIntentMaximumSeconds - kIntentMinimumSeconds);
+    const ActorEcosystemTuning& tuning = GetActorEcosystemTuning();
+    state.intentDecisionRemaining = tuning.intentMinimumSeconds +
+        NextUnit(state.randomState) *
+            (tuning.intentMaximumSeconds - tuning.intentMinimumSeconds);
     if (!perception.perceived) {
         state.heldIntent = LocalIntent::Ignore;
         state.intentTargetActor = kNoEncounterActor;
@@ -342,7 +352,8 @@ std::vector<LocalEncounterRequest> BuildLocalEncounterRequests(
                 useFirst ? firstState.heldIntent : secondState.heldIntent,
                 useFirst ? secondState.heldIntent : firstState.heldIntent,
                 encounterIntent,
-                {(first.x + second.x) * 0.5, (first.y + second.y) * 0.5, extent * 2.35},
+                {(first.x + second.x) * 0.5, (first.y + second.y) * 0.5,
+                    extent * GetActorEcosystemTuning().reservationRadiusScale},
                 firstState.intentCandidateScore + secondState.intentCandidateScore,
             });
         }
@@ -359,7 +370,8 @@ void RecordActorEncounter(
     state.lastEncounterActor = counterpartIndex;
     state.lastEncounterOutcome = outcome;
     state.encounterCooldownRemaining = std::max(state.encounterCooldownRemaining, std::max(0.0, cooldownSeconds));
-    state.recentEncounterMemoryRemaining = kRecentEncounterMemorySeconds;
+    const ActorEcosystemTuning& tuning = GetActorEcosystemTuning();
+    state.recentEncounterMemoryRemaining = tuning.recentEncounterMemorySeconds;
     state.alertness = std::clamp(state.alertness + 0.35, 0.0, 1.0);
     state.agitation = std::clamp(state.agitation +
         (outcome == ActorEncounterOutcome::Combat ? 0.38 : 0.16), 0.0, 1.0);
@@ -367,7 +379,7 @@ void RecordActorEncounter(
         (outcome == ActorEncounterOutcome::Combat ? 0.16 : 0.05), 0.0, 1.0);
     state.heldIntent = LocalIntent::Ignore;
     state.intentTargetActor = kNoEncounterActor;
-    state.intentDecisionRemaining = kIntentMinimumSeconds;
+    state.intentDecisionRemaining = tuning.intentMinimumSeconds;
     state.intentCandidateScore = 0.0;
 }
 
