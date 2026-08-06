@@ -34,7 +34,7 @@ Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一
 
 当前阶段：**v0.1.0 RC**。桌面舞台、真实图标采集、图标演员、基础动作和安全退出已经落地，正在完成首个公开下载候选版本的兼容性与发布验收，尚未正式发布。
 
-本轮已进入首版体验收口：默认演出只保留分波觉醒、自由漫游、局部相遇、完整交锋与克制的邻近反应，不再继续增加大型导演、动作或生态系统。下一阶段将转向用户支持/打赏入口与正式发布验收。
+本轮已进入首版体验收口：默认演出只保留分波觉醒、自由漫游、局部相遇、完整交锋与克制的邻近反应，不再继续增加大型导演、动作或生态系统。下一阶段只新增独立于图标生态的品牌引导角色“B仔”，在舞台内承载官方反馈、自愿支持和安全说明，然后重新进入正式发布验收。
 
 ## 它会发生什么？
 
@@ -184,6 +184,7 @@ Debug 或已启用诊断的 Release 会记录详细 Info 日志；普通 Release
 - Core 单 EXE 发布构建：[docs/RELEASE.md](docs/RELEASE.md)
 - v0.1.0 发布说明候选稿：[docs/RELEASE_NOTES_v0.1.0.md](docs/RELEASE_NOTES_v0.1.0.md)
 - v0.1.0 发布候选验收清单：[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
+- 舞台引导角色实施计划：[docs/STAGE_GUIDE_NPC.md](docs/STAGE_GUIDE_NPC.md)
 - 插件框架 MVP：[docs/MVP_PLUGIN_FRAMEWORK.md](docs/MVP_PLUGIN_FRAMEWORK.md)
 
 ## 仓库关系

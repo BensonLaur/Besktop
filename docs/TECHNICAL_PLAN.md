@@ -20,7 +20,6 @@ Besktop Core 需要满足几个关键目标：
 app/
   BesktopApp
   Settings
-  TrayController
   HotkeyController
 
 desktop/
@@ -42,6 +41,7 @@ animation/
   IconActor
   ActionClip
   ActionStateMachine
+  StageGuideNpc / StageGuideLayout
   AwakeningDirector
   CombatDirector
   EncounterDirector
@@ -236,7 +236,15 @@ Yield 和 Bluff 继续只使用独立 encounter 加法姿态与小范围移动�
 
 首版产品模式接入后的 x64 Release 快速对照中，全量演员各采样约 `22` 秒：Director 开启的稳定样本平均 `27.78 FPS`（`26.6–28.6`），按 `P` 切换纯漫游后平均 `27.15 FPS`（`25.6–28.0`）。两组均处于当前机器约 `25–27 FPS` 的短测基线附近，未观察到 Director 带来的明确额外回退；该数据只用于快速回归，不替代发布候选阶段的长期性能与资源稳定性测试。
 
-v0.1.0 已进入成品体验收口，不再继续扩张导演、动作和生态架构。普通 Release 的产品节奏分别集中在 `AwakeningDirectorTuning`、`ActorEcosystemTuning`、`CombatEpisodeTuning`、`CombatDirectorTuning` 与 `ActorEventReactionTuning`；它们是源码内只读默认值，不是新的用户配置系统。环境变量仍只用于受 `BESKTOP_ENABLE_DIAGNOSTICS=1` 保护的开发诊断。下一阶段是用户支持/打赏入口和正式发布验收。
+v0.1.0 已进入成品体验收口，不再继续扩张导演、动作和生态架构。普通 Release 的产品节奏分别集中在 `AwakeningDirectorTuning`、`ActorEcosystemTuning`、`CombatEpisodeTuning`、`CombatDirectorTuning` 与 `ActorEventReactionTuning`；它们是源码内只读默认值，不是新的用户配置系统。环境变量仍只用于受 `BESKTOP_ENABLE_DIAGNOSTICS=1` 保护的开发诊断。下一阶段只增加独立的舞台引导角色和官方入口，再重新执行正式发布验收。
+
+## 舞台引导角色与鼠标入口
+
+v0.1.0 使用舞台内品牌角色“B仔”承载官方反馈、自愿支持和安全说明，不增加托盘、最小化或后台驻留。B仔复用现有身体投影、四肢和工作区域约束，但拥有独立纯逻辑状态与布局，不进入普通演员列表、相遇仲裁、交锋段或邻近事件反应。
+
+`StageWindow` 负责把 `WM_MOUSEMOVE`、`WM_MOUSELEAVE`、`WM_LBUTTONUP` 与 `WM_SETCURSOR` 转换为客户区指针输入；场景负责 B仔和菜单的 DPI-aware 命中区域。外链以枚举动作从场景传给窗口/应用层，只有用户点击并确认后才触发。应用必须先销毁置顶舞台、恢复真实桌面，再通过系统默认浏览器打开经过批准的固定 HTTPS URL 并退出进程。
+
+详细的状态机、模块边界、测试和验收见 [STAGE_GUIDE_NPC.md](STAGE_GUIDE_NPC.md)。正式反馈或打赏 URL 未确认时，普通 Release 不显示无效入口，也不使用占位链接。
 
 ## Plus 扩展边界
 
