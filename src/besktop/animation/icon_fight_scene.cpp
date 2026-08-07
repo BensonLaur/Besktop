@@ -3,6 +3,7 @@
 #include "besktop/animation/gait_ik.h"
 #include "besktop/app/runtime_options.h"
 #include "besktop/logging/logger.h"
+#include "besktop/render/stage_guide_renderer.h"
 
 #include <objidl.h>
 #include <gdiplus.h>
@@ -1360,7 +1361,109 @@ bool IconFightScene::ToggleAutomaticInteractions()
     return true;
 }
 
-void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRect)
+void IconFightScene::SetStageGuidePointer(double x, double y, bool insideWindow)
+{
+    stageGuidePointer_.insideWindow = insideWindow;
+    stageGuidePointer_.position = {x, y};
+    RebuildStageGuideLayout();
+    stageGuidePointer_.insideBodyHover = insideWindow &&
+        StageGuidePointInRect(stageGuidePointer_.position, stageGuideLayout_.bodyHoverRect);
+    stageGuidePointer_.insideInteractionRegion = insideWindow &&
+        IsStageGuideInteractivePoint(stageGuideLayout_, stageGuidePointer_.position);
+    stageGuidePointer_.hitTarget = insideWindow ?
+        HitTestStageGuideLayout(stageGuideLayout_, stageGuidePointer_.position) :
+        StageGuideHitTarget::None;
+}
+
+void IconFightScene::ClearStageGuidePointer(bool dismissPanels)
+{
+    stageGuidePointer_ = {};
+    ClearStageGuidePointerInteraction(stageGuideNpc_, dismissPanels);
+    RebuildStageGuideLayout();
+}
+
+bool IconFightScene::HandleStageGuidePointerClick(double x, double y)
+{
+    SetStageGuidePointer(x, y, true);
+    const bool handled = HandleStageGuideClick(stageGuideNpc_, stageGuidePointer_.hitTarget);
+    if (handled) RebuildStageGuideLayout();
+    return handled;
+}
+
+bool IconFightScene::IsStageGuidePointerClickable(double x, double y) const
+{
+    return IsStageGuideClickableTarget(
+        HitTestStageGuideLayout(stageGuideLayout_, {x, y}));
+}
+
+StageGuideExternalAction IconFightScene::ConsumeStageGuideExternalAction()
+{
+    return besktop::ConsumeStageGuideExternalAction(stageGuideNpc_);
+}
+
+void IconFightScene::RebuildStageGuideLayout()
+{
+    stageGuideLayout_ = ComputeStageGuideLayout({
+        {
+            static_cast<double>(wanderBounds_.left),
+            static_cast<double>(wanderBounds_.top),
+            static_cast<double>(wanderBounds_.right),
+            static_cast<double>(wanderBounds_.bottom),
+        },
+        stageGuideNpc_.position,
+        stageGuideNpc_.bodySize,
+        stageGuideDpiScale_,
+        stageGuideNpc_.menuProgress,
+        stageGuideNpc_.availability,
+        StageGuideNpcShowsMenu(stageGuideNpc_),
+        StageGuideNpcShowsAbout(stageGuideNpc_),
+        StageGuideNpcShowsExternalConfirmation(stageGuideNpc_),
+        stageGuideNpc_.confirmingEntry,
+    });
+}
+
+void IconFightScene::UpdateStageGuide(double deltaSeconds)
+{
+    stageGuideReservations_.clear();
+    if (stageGuideReservations_.capacity() < activeEncounterPool_.encounters.size()) {
+        stageGuideReservations_.reserve(activeEncounterPool_.encounters.size());
+    }
+    for (const ActiveEncounter& active : activeEncounterPool_.encounters) {
+        if (active.released || active.reservation.radius <= 0.0) continue;
+        stageGuideReservations_.push_back({
+            {active.reservation.centerX, active.reservation.centerY},
+            active.reservation.radius,
+        });
+    }
+
+    RebuildStageGuideLayout();
+    stageGuidePointer_.insideBodyHover = stageGuidePointer_.insideWindow &&
+        StageGuidePointInRect(stageGuidePointer_.position, stageGuideLayout_.bodyHoverRect);
+    stageGuidePointer_.insideInteractionRegion = stageGuidePointer_.insideWindow &&
+        IsStageGuideInteractivePoint(stageGuideLayout_, stageGuidePointer_.position);
+    stageGuidePointer_.hitTarget = stageGuidePointer_.insideWindow ?
+        HitTestStageGuideLayout(stageGuideLayout_, stageGuidePointer_.position) :
+        StageGuideHitTarget::None;
+    UpdateStageGuideNpc(
+        stageGuideNpc_,
+        {
+            deltaSeconds,
+            {
+                static_cast<double>(wanderBounds_.left),
+                static_cast<double>(wanderBounds_.top),
+                static_cast<double>(wanderBounds_.right),
+                static_cast<double>(wanderBounds_.bottom),
+            },
+            stageGuideReservations_,
+            stageGuidePointer_,
+        });
+    RebuildStageGuideLayout();
+}
+
+void IconFightScene::Reset(
+    const DesktopSnapshot& snapshot,
+    const RECT& clientRect,
+    const StageGuideConfig& stageGuideConfig)
 {
     actors_.clear();
     poseCache_.clear();
@@ -1407,6 +1510,9 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     turnPreviewEnabled_ = experienceMode == RuntimeExperienceMode::TurnPreview;
     automaticInteractionToast_.clear();
     automaticInteractionToastStartTick_ = 0;
+    stageGuideDpiScale_ = std::clamp(stageGuideConfig.dpiScale, 0.75, 2.5);
+    stageGuidePointer_ = {};
+    stageGuideReservations_.clear();
 
     const unsigned char colors[][3] = {
         {44, 135, 255},
@@ -1430,6 +1536,14 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
     const double displayPlaneHeight = hasImageListSize ?
         static_cast<double>(snapshot.iconDisplay.imageListIconSize.cy) * coordinateScale :
         48.0 * coordinateScale;
+    InitializeStageGuideNpc(
+        stageGuideNpc_,
+        {
+            0xB17A6E21u,
+            std::max(displayPlaneWidth, displayPlaneHeight),
+            stageGuideConfig.diagnosticPreview,
+            stageGuideConfig.availability,
+        });
     const std::wstring planeSizeSource = hasImageListSize ?
         snapshot.iconDisplay.source :
         std::wstring(L"scene fallback");
@@ -1635,6 +1749,7 @@ void IconFightScene::Reset(const DesktopSnapshot& snapshot, const RECT& clientRe
             L"; calm=" + std::to_wstring(tendencyCounts[3]) +
             L"; energetic=" + std::to_wstring(tendencyCounts[4]));
     }
+    RebuildStageGuideLayout();
     size_t boundActorCount = 0;
     size_t labelBoundsActorCount = 0;
     for (const IconActor& actor : actors_) {
@@ -1759,6 +1874,7 @@ void IconFightScene::Update(double elapsedSeconds)
     } else if (combatDirectorEnabled_) {
         UpdateCombatDirector(deltaSeconds, actionDeltaSeconds);
     }
+    UpdateStageGuide(deltaSeconds);
     for (IconActor& actor : actors_) {
         const auto updateLocomotionWeight = [&actor, deltaSeconds](double targetWeight) {
             actor.locomotionWeight = BlendTurnLocomotion(
@@ -2468,6 +2584,8 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
             timings->limbsMs += CounterMilliseconds(limbStart, end);
         }
     }
+
+    DrawStageGuideNpc(graphics, stageGuideNpc_, stageGuideLayout_);
 
     Gdiplus::FontFamily fontFamily(L"Microsoft YaHei UI");
     if (!automaticInteractionToast_.empty()) {

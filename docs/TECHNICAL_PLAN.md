@@ -201,6 +201,7 @@ packs/
 - `BESKTOP_ACTION_PREVIEW=<动作 ID>`：让首个有效演员在觉醒后原地循环预览第一轮 16 个公开动作 ID；完整清单见 `README.md` 与 `FIGHT_ACTION_IMPLEMENTATION.md`。
 - `BESKTOP_COMBAT_PREVIEW=<场景 ID>`：让前两个有效演员运行固定双人攻防闭环；当前支持 `lead_parry`、`lead_slip`、`uppercut_light_hit`、`side_kick_heavy_hit`。它优先于转身和单动作预览，并且同样只在 Debug 或 Release diagnostics 总开关下生效。
 - `BESKTOP_COMBAT_DIRECTOR_PREVIEW=1`：显式启用轻量导演的诊断观测；同时最多预约并控制一对已经觉醒的演员，完成一轮固定攻防、分开和冷却后交还漫游。普通 Release 未开启 diagnostics 时忽略该变量，但产品 Director 本身默认开启。
+- `BESKTOP_STAGE_GUIDE_PREVIEW=1`：让 B仔立即出现在安全区域，并显示完整诊断菜单以检查 hover、边缘布局、说明卡和确认卡；其中反馈/支持仅为 mock 动作，不启动浏览器。
 - `BESKTOP_ACTION_ORBIT_CAMERA=1`：仅在动作预览中增加独立观察 yaw，摄像头以 8 个动画秒一圈绕身体中轴连续观察；图标薄片、肩胯和四肢共同经过观察投影，但不修改动作 clip、逻辑前后手、`currentFacing` 或 `TurnMotionState`。
 - `BESKTOP_TURN_PREVIEW=1`：让首个有效演员原地循环“向右站立—转向左—停顿—转向右—停顿”，用于慢放检查 90° 薄片、挂点连续性和深度交换。
 
@@ -236,13 +237,13 @@ Yield 和 Bluff 继续只使用独立 encounter 加法姿态与小范围移动�
 
 首版产品模式接入后的 x64 Release 快速对照中，全量演员各采样约 `22` 秒：Director 开启的稳定样本平均 `27.78 FPS`（`26.6–28.6`），按 `P` 切换纯漫游后平均 `27.15 FPS`（`25.6–28.0`）。两组均处于当前机器约 `25–27 FPS` 的短测基线附近，未观察到 Director 带来的明确额外回退；该数据只用于快速回归，不替代发布候选阶段的长期性能与资源稳定性测试。
 
-v0.1.0 已进入成品体验收口，不再继续扩张导演、动作和生态架构。普通 Release 的产品节奏分别集中在 `AwakeningDirectorTuning`、`ActorEcosystemTuning`、`CombatEpisodeTuning`、`CombatDirectorTuning` 与 `ActorEventReactionTuning`；它们是源码内只读默认值，不是新的用户配置系统。环境变量仍只用于受 `BESKTOP_ENABLE_DIAGNOSTICS=1` 保护的开发诊断。下一阶段只增加独立的舞台引导角色和官方入口，再重新执行正式发布验收。
+v0.1.0 已进入成品体验收口，不再继续扩张导演、动作和生态架构。普通 Release 的产品节奏分别集中在 `AwakeningDirectorTuning`、`ActorEcosystemTuning`、`CombatEpisodeTuning`、`CombatDirectorTuning` 与 `ActorEventReactionTuning`；它们是源码内只读默认值，不是新的用户配置系统。环境变量仍只用于受 `BESKTOP_ENABLE_DIAGNOSTICS=1` 保护的开发诊断。独立舞台引导角色已经接入，当前只剩正式 URL 决策、人工视觉和发布候选矩阵验收。
 
 ## 舞台引导角色与鼠标入口
 
-v0.1.0 使用舞台内品牌角色“B仔”承载官方反馈、自愿支持和安全说明，不增加托盘、最小化或后台驻留。B仔复用现有身体投影、四肢和工作区域约束，但拥有独立纯逻辑状态与布局，不进入普通演员列表、相遇仲裁、交锋段或邻近事件反应。
+v0.1.0 使用舞台内品牌角色“B仔”承载官方反馈、自愿支持和安全说明，不增加托盘、最小化或后台驻留。`stage_guide_npc.*` 独立维护 `Dormant → Entering → Roaming → NoticingPointer → PresentingMenu` 及说明卡、确认卡、外链收场状态；`stage_guide_layout.*` 统一计算身体、菜单气泡、交互走廊和卡片的 DPI-aware 布局。B仔使用独立随机源，只读取活动 reservation 快照用于避让，不进入普通演员列表、相遇仲裁、交锋段或邻近事件反应。
 
-`StageWindow` 负责把 `WM_MOUSEMOVE`、`WM_MOUSELEAVE`、`WM_LBUTTONUP` 与 `WM_SETCURSOR` 转换为客户区指针输入；场景负责 B仔和菜单的 DPI-aware 命中区域。外链以枚举动作从场景传给窗口/应用层，只有用户点击并确认后才触发。应用必须先销毁置顶舞台、恢复真实桌面，再通过系统默认浏览器打开经过批准的固定 HTTPS URL 并退出进程。
+`StageWindow` 负责把 `WM_MOUSEMOVE`、`WM_MOUSELEAVE`、`WM_LBUTTONUP` 与 `WM_SETCURSOR` 转换为客户区指针输入；场景负责 B仔和菜单的 DPI-aware 命中区域。外链以 `Feedback / Support` 枚举动作从场景传给窗口/应用层，只有用户点击并确认后才触发。注入式执行器固定执行“停止计时器 → 销毁舞台 → 确认窗口已销毁 → 分发批准动作”；只有源码内白名单中的固定 HTTPS URL 才能交给 `ShellExecuteW`。
 
 详细的状态机、模块边界、测试和验收见 [STAGE_GUIDE_NPC.md](STAGE_GUIDE_NPC.md)。正式反馈或打赏 URL 未确认时，普通 Release 不显示无效入口，也不使用占位链接。
 

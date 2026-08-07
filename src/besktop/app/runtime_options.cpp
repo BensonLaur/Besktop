@@ -109,6 +109,7 @@ RuntimeOptions LoadRuntimeOptions()
     options.invalidActionPreview = !actionPreviewName.empty() && options.actionPreview == ActionId::None;
     options.actionOrbitCameraEnabled = ReadTruthyEnvironmentFlag(L"BESKTOP_ACTION_ORBIT_CAMERA");
     options.turnPreviewEnabled = ReadTruthyEnvironmentFlag(L"BESKTOP_TURN_PREVIEW");
+    options.stageGuidePreviewEnabled = ReadTruthyEnvironmentFlag(L"BESKTOP_STAGE_GUIDE_PREVIEW");
     return options;
 }
 

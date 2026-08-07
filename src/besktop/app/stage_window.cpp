@@ -2,6 +2,7 @@
 
 #include "besktop/animation/icon_fight_scene.h"
 #include "besktop/app/runtime_options.h"
+#include "besktop/app/stage_guide_external_action.h"
 #include "besktop/desktop/desktop_snapshot.h"
 #include "besktop/logging/logger.h"
 #include "besktop/render/wallpaper_renderer.h"
@@ -10,7 +11,10 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <shellapi.h>
 #include <string>
+#include <string_view>
+#include <windowsx.h>
 
 namespace {
 
@@ -18,6 +22,24 @@ constexpr wchar_t kStageWindowClassName[] = L"BesktopStageWindow";
 constexpr int kForceExitHotkeyId = 1;
 constexpr UINT_PTR kAnimationTimerId = 2;
 constexpr UINT kAnimationFrameMs = 16;
+
+std::wstring_view ApprovedStageGuideUrl(besktop::StageGuideExternalAction action)
+{
+    // Production endpoints are deliberately absent until the user explicitly
+    // approves them. Diagnostic preview uses an in-process mock instead.
+    switch (action) {
+    case besktop::StageGuideExternalAction::Feedback:
+    case besktop::StageGuideExternalAction::Support:
+    case besktop::StageGuideExternalAction::None:
+    default:
+        return {};
+    }
+}
+
+bool IsApprovedHttpsUrl(std::wstring_view url)
+{
+    return url.size() > 8 && url.substr(0, 8) == L"https://";
+}
 
 bool IsKeyPressed(int virtualKey)
 {
@@ -135,6 +157,9 @@ private:
     bool EnsureRenderBuffers(HDC referenceHdc, int width, int height);
     bool EnsureStaticBackground(const RECT& clientRect, FrameTimings& timings);
     void ResetRenderBuffers();
+    void StopAnimationTimer();
+    void HandleStageGuideExternalAction(StageGuideExternalAction action);
+    bool DispatchApprovedStageGuideAction(StageGuideExternalAction action);
     void RegisterForceExitHotkey();
     void UnregisterForceExitHotkey();
     void LogSnapshot() const;
@@ -178,6 +203,8 @@ private:
     HGDIOBJ previousStaticBackgroundBitmap_ = nullptr;
     SIZE renderBufferSize_{};
     bool staticBackgroundReady_ = false;
+    bool trackingMouseLeave_ = false;
+    bool externalActionFlowStarted_ = false;
 };
 
 StageWindow::StageWindow(HINSTANCE instance, const RuntimeOptions& options)
@@ -304,7 +331,23 @@ bool StageWindow::Create(int showCommand)
     LogInfo(L"stage window dpi: " + std::to_wstring(GetDpiForWindowCompat(hwnd_)));
     LogInfo(L"stage window rect: " + FormatRect(windowRect));
     LogInfo(L"stage client rect: " + FormatRect(clientRect));
-    scene_.Reset(snapshot_, clientRect);
+    StageGuideMenuAvailability guideAvailability;
+    guideAvailability.feedback = IsApprovedHttpsUrl(
+        ApprovedStageGuideUrl(StageGuideExternalAction::Feedback));
+    guideAvailability.support = IsApprovedHttpsUrl(
+        ApprovedStageGuideUrl(StageGuideExternalAction::Support));
+    if (options_.stageGuidePreviewEnabled) {
+        guideAvailability.feedback = true;
+        guideAvailability.support = true;
+    }
+    scene_.Reset(
+        snapshot_,
+        clientRect,
+        {
+            static_cast<double>(GetDpiForWindowCompat(hwnd_)) / 96.0,
+            guideAvailability,
+            options_.stageGuidePreviewEnabled,
+        });
     ShowWindow(hwnd_, showCommand == 0 ? SW_SHOW : showCommand);
     SetFocus(hwnd_);
     animationStartTick_ = GetTickCount64();
@@ -325,6 +368,53 @@ void StageWindow::Close()
     LogInfo(L"Close called");
     if (hwnd_ != nullptr) {
         DestroyWindow(hwnd_);
+    }
+}
+
+void StageWindow::StopAnimationTimer()
+{
+    if (!animationTimerStarted_ || hwnd_ == nullptr) return;
+    KillTimer(hwnd_, kAnimationTimerId);
+    animationTimerStarted_ = false;
+    LogInfo(L"animation timer stopped");
+}
+
+bool StageWindow::DispatchApprovedStageGuideAction(StageGuideExternalAction action)
+{
+    if (options_.stageGuidePreviewEnabled) {
+        LogInfo(L"stage guide diagnostic mock external action: " +
+            std::to_wstring(static_cast<int>(action)));
+        return true;
+    }
+    const std::wstring_view url = ApprovedStageGuideUrl(action);
+    if (!IsApprovedHttpsUrl(url)) {
+        LogWarning(L"stage guide external action has no approved endpoint");
+        return false;
+    }
+    const std::wstring ownedUrl(url);
+    return reinterpret_cast<INT_PTR>(ShellExecuteW(
+        nullptr, L"open", ownedUrl.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+}
+
+void StageWindow::HandleStageGuideExternalAction(StageGuideExternalAction action)
+{
+    if (externalActionFlowStarted_ || action == StageGuideExternalAction::None) return;
+    externalActionFlowStarted_ = true;
+    const StageGuideExternalDispatchResult result = ExecuteStageGuideExternalAction(
+        action,
+        {
+            [this] { StopAnimationTimer(); },
+            [this] {
+                if (hwnd_ != nullptr) DestroyWindow(hwnd_);
+            },
+            [this] { return hwnd_ == nullptr; },
+            [this](StageGuideExternalAction approvedAction) {
+                return DispatchApprovedStageGuideAction(approvedAction);
+            },
+        });
+    if (result != StageGuideExternalDispatchResult::Completed) {
+        LogWarning(L"stage guide external action did not complete: " +
+            std::to_wstring(static_cast<int>(result)));
     }
 }
 
@@ -770,6 +860,52 @@ void StageWindow::LogFrameStatsIfDue(ULONGLONG now)
 LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
+    case WM_MOUSEMOVE: {
+        if (!trackingMouseLeave_) {
+            TRACKMOUSEEVENT tracking{};
+            tracking.cbSize = sizeof(tracking);
+            tracking.dwFlags = TME_LEAVE;
+            tracking.hwndTrack = hwnd_;
+            trackingMouseLeave_ = TrackMouseEvent(&tracking) != FALSE;
+        }
+        scene_.SetStageGuidePointer(
+            static_cast<double>(GET_X_LPARAM(lParam)),
+            static_cast<double>(GET_Y_LPARAM(lParam)),
+            true);
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    }
+    case WM_MOUSELEAVE:
+        trackingMouseLeave_ = false;
+        scene_.ClearStageGuidePointer(false);
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    case WM_LBUTTONUP:
+        if (scene_.HandleStageGuidePointerClick(
+                static_cast<double>(GET_X_LPARAM(lParam)),
+                static_cast<double>(GET_Y_LPARAM(lParam)))) {
+            InvalidateRect(hwnd_, nullptr, FALSE);
+            return 0;
+        }
+        break;
+    case WM_SETCURSOR:
+        if (LOWORD(lParam) == HTCLIENT) {
+            POINT point{};
+            if (GetCursorPos(&point) && ScreenToClient(hwnd_, &point) &&
+                scene_.IsStageGuidePointerClickable(point.x, point.y)) {
+                SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                return TRUE;
+            }
+            SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+            return TRUE;
+        }
+        break;
+    case WM_KILLFOCUS:
+    case WM_CANCELMODE:
+    case WM_CAPTURECHANGED:
+        scene_.ClearStageGuidePointer(true);
+        trackingMouseLeave_ = false;
+        return 0;
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE ||
             (wParam == 'B' && IsKeyPressed(VK_CONTROL) && IsKeyPressed(VK_SHIFT))) {
@@ -798,6 +934,12 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             elapsedSeconds_ = options_.animationOffsetSeconds +
                 ((static_cast<double>(now - animationStartTick_) / 1000.0) * options_.animationSpeed);
             scene_.Update(elapsedSeconds_);
+            const StageGuideExternalAction externalAction =
+                scene_.ConsumeStageGuideExternalAction();
+            if (externalAction != StageGuideExternalAction::None) {
+                HandleStageGuideExternalAction(externalAction);
+                return 0;
+            }
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
@@ -811,11 +953,9 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         Paint();
         return 0;
     case WM_DESTROY:
-        if (animationTimerStarted_) {
-            KillTimer(hwnd_, kAnimationTimerId);
-            animationTimerStarted_ = false;
-            LogInfo(L"animation timer stopped");
-        }
+        scene_.ClearStageGuidePointer(true);
+        trackingMouseLeave_ = false;
+        StopAnimationTimer();
         UnregisterForceExitHotkey();
         ResetRenderBuffers();
         LogInfo(L"WM_DESTROY; posting quit message");

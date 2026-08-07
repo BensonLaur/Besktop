@@ -554,7 +554,14 @@ void IconFightScene::UpdateCombatDirector(double deltaSeconds, double actionDelt
         RecordActorEncounter(defender.runtimeState, attackerIndex, defenderOutcome, cooldown);
         clearActor(attacker);
         clearActor(defender);
+        const StageGuidePoint completedEncounterCenter{
+            active.reservation.centerX,
+            active.reservation.centerY,
+        };
         ReleaseActiveEncounter(activeEncounterPool_, id, false);
+        NotifyStageGuideFirstEncounterCompleted(
+            stageGuideNpc_,
+            completedEncounterCenter);
         ChooseWanderTargetAwayFrom(attacker, defender.x, -1.0);
         ChooseWanderTargetAwayFrom(defender, attacker.x, 1.0);
         LogInfo(L"active encounter completed: id=" + std::to_wstring(id));

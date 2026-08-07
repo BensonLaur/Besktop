@@ -17,6 +17,7 @@
 #include "besktop/animation/combat_director.h"
 #include "besktop/animation/encounter_arbiter.h"
 #include "besktop/animation/encounter_director.h"
+#include "besktop/animation/stage_guide_npc.h"
 #include "besktop/animation/turn_motion.h"
 #include "besktop/render/icon_image_cache.h"
 
@@ -36,6 +37,12 @@ public:
         double limbsMs = 0.0;
         double iconBodyMs = 0.0;
         double labelMs = 0.0;
+    };
+
+    struct StageGuideConfig {
+        double dpiScale = 1.0;
+        StageGuideMenuAvailability availability{};
+        bool diagnosticPreview = false;
     };
 
     struct ActorPose {
@@ -68,10 +75,18 @@ public:
         ActionSample action{};
     };
 
-    void Reset(const DesktopSnapshot& snapshot, const RECT& clientRect);
+    void Reset(
+        const DesktopSnapshot& snapshot,
+        const RECT& clientRect,
+        const StageGuideConfig& stageGuideConfig = {});
     void Update(double elapsedSeconds);
     void Render(HDC hdc, const RECT& clientRect, RenderTimings* timings = nullptr) const;
     bool ToggleAutomaticInteractions();
+    void SetStageGuidePointer(double x, double y, bool insideWindow);
+    void ClearStageGuidePointer(bool dismissPanels);
+    bool HandleStageGuidePointerClick(double x, double y);
+    bool IsStageGuidePointerClickable(double x, double y) const;
+    StageGuideExternalAction ConsumeStageGuideExternalAction();
 
     // Public for the small free functions in the implementation file; this is
     // still an internal scene type, not a plugin-facing API.
@@ -156,6 +171,8 @@ private:
         double actionDeltaSeconds);
     void UpdateCombatDirector(double deltaSeconds, double actionDeltaSeconds);
     void UpdateAwakeningSchedule();
+    void UpdateStageGuide(double deltaSeconds);
+    void RebuildStageGuideLayout();
     void ConfigureCombatStations(
         std::size_t attackerIndex,
         std::size_t defenderIndex,
@@ -205,6 +222,11 @@ private:
     CombatPairPhase loggedCombatPhase_ = CombatPairPhase::Inactive;
     bool actionOrbitCameraEnabled_ = false;
     bool turnPreviewEnabled_ = false;
+    StageGuideNpcState stageGuideNpc_{};
+    StageGuideLayout stageGuideLayout_{};
+    StageGuidePointerInput stageGuidePointer_{};
+    std::vector<StageGuideReservation> stageGuideReservations_;
+    double stageGuideDpiScale_ = 1.0;
     std::wstring automaticInteractionToast_;
     ULONGLONG automaticInteractionToastStartTick_ = 0;
 };

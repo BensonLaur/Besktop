@@ -32,6 +32,7 @@ struct RuntimeOptions {
     bool combatDirectorDiagnosticsEnabled = false;
     bool actionOrbitCameraEnabled = false;
     bool turnPreviewEnabled = false;
+    bool stageGuidePreviewEnabled = false;
 };
 
 RuntimeOptions LoadRuntimeOptions();

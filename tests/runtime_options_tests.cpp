@@ -11,6 +11,7 @@ int main()
     SetEnvironmentVariableW(L"BESKTOP_COMBAT_DIRECTOR_PREVIEW", L"1");
     SetEnvironmentVariableW(L"BESKTOP_ACTION_PREVIEW", L"lead_straight");
     SetEnvironmentVariableW(L"BESKTOP_TURN_PREVIEW", L"1");
+    SetEnvironmentVariableW(L"BESKTOP_STAGE_GUIDE_PREVIEW", L"1");
     const besktop::RuntimeOptions gatedOptions = besktop::LoadRuntimeOptions();
     const bool gated = !gatedOptions.diagnosticsEnabled &&
         !gatedOptions.verboseInfoLogging &&
@@ -19,6 +20,7 @@ int main()
         !gatedOptions.combatDirectorDiagnosticsEnabled &&
         gatedOptions.actionPreview == besktop::ActionId::None &&
         !gatedOptions.turnPreviewEnabled &&
+        !gatedOptions.stageGuidePreviewEnabled &&
         besktop::ResolveRuntimeExperienceMode(gatedOptions) ==
             besktop::RuntimeExperienceMode::CombatDirector;
     if (!gated) {
@@ -30,9 +32,11 @@ int main()
     const besktop::RuntimeOptions diagnosticOptions = besktop::LoadRuntimeOptions();
     SetEnvironmentVariableW(L"BESKTOP_ENABLE_DIAGNOSTICS", nullptr);
     SetEnvironmentVariableW(L"BESKTOP_COMBAT_DIRECTOR_PREVIEW", nullptr);
+    SetEnvironmentVariableW(L"BESKTOP_STAGE_GUIDE_PREVIEW", nullptr);
     if (!diagnosticOptions.diagnosticsEnabled ||
         !diagnosticOptions.combatDirectorEnabled ||
-        !diagnosticOptions.combatDirectorDiagnosticsEnabled) {
+        !diagnosticOptions.combatDirectorDiagnosticsEnabled ||
+        !diagnosticOptions.stageGuidePreviewEnabled) {
         std::cerr << "diagnostics did not enable combat director preview\n";
         return 1;
     }

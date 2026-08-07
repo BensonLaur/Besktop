@@ -23,8 +23,9 @@
 - `besktop_runtime` 能加载内置免费包和开发期 Plus 包，`besktop_mvp_cli` 继续验证包加载链路。
 - GUI `besktop` 已是支持 `Esc` 与 `Ctrl+Shift+B` 安全退出的 Win32 全屏应用壳。
 - 普通 Release 默认运行分波觉醒、漫游、多个安全局部相遇、完整交锋和克制的邻近反应。
+- 独立舞台品牌角色 B仔已接入安全出场、巡场避让、hover 菜单、舞台内说明卡和受确认保护的外链动作闭环。
 
-后续实现必须保留 `besktop_mvp_cli`，不要拆掉现有 Pack MVP。v0.1.0 已冻结动作、Contact、步态、转身和默认演出参数；本阶段只允许新增与普通图标生态隔离的品牌引导角色，不再扩张战斗或导演架构。
+后续实现必须保留 `besktop_mvp_cli`，不要拆掉现有 Pack MVP。v0.1.0 已冻结动作、Contact、步态、转身、默认演出参数和 B仔模块边界；不再扩张战斗或导演架构，下一步只处理正式 URL 决策、人工视觉和发布候选验收。
 
 ## 阶段 1：应用壳和安全退出
 
@@ -157,7 +158,7 @@ Recovering
 - `CombatEpisode` 已把产品 Combat 从一次 Pair 扩展为通常 `3–7` 次、以 `4–6` 次为主的完整交锋：中间 Pair 完整恢复后保持面对，在 `0.3–0.8` 秒内重整站位；最终 Pair 只保留 `0.14–0.28` 秒收势，再进入唯一一次结果余波，避免重复等待。下一主动方与场景仍由稳定随机、双方倾向、体力、压力、主动权和上一结果决定。拨挡、闪避和打空优先让防守方反击；同一演员最多连续主动两次；重击低频进入后半段并显著提高结束概率。整场只提交一次最终结果、余波和离场，并有约 `20` 秒硬超时。多个 Episode 状态互不共享且不增加固定并发上限。按 `P` 关闭后不再产生新请求，正在交锋的 Episode 完成当前 Pair 后分别自然收尾；再次开启先纯漫游 `5` 秒。固定诊断预览仍直接走原单次 `CombatPair` 并暂停产品池。
 - 邻近演员反应已拆到纯逻辑 `ActorEventReaction`：活动相遇只提供事件 ID、中心、reservation、阶段、交换 Contact、结果和连续强度快照，不读取桌面项语义。`ActorEventReactionTuning` 集中维护事件显著度、观察距离、`0.45–0.9` 秒评估窗口、局部密度抑制、最长约 `5.5` 秒反应和 `5–9` 秒个体冷却。每个非参与演员根据距离、视野、稳定倾向与临时状态独立决定无视、短暂注意、在全部 reservation 外观察或主动避让；没有固定全局旁观人数，同一事件已有反应者越多，新增反应概率越低。Curious 更常观察，Timid 对重击更易远离，Calm 多数保持原路，Bold 可在外圈更近观察，Energetic 可边走边关注。反应复用现有走路与连续转身，不新增动作；活动反应保持当前事件，同一 Contact 不会重复重启反应，P 关闭或事件异常结束后都能安全恢复漫游。
 
-- v0.1.0 已进入首版体验收口：不再新增大型导演、动作或生态架构；普通 Release 继续提供全量觉醒、漫游、局部并行相遇、完整交锋和背景反应。下一阶段只按 [STAGE_GUIDE_NPC.md](STAGE_GUIDE_NPC.md) 增加舞台内品牌引导角色，承载官方反馈、自愿支持和安全说明，完成后重新执行正式发布验收；诊断环境变量仍只供开发期使用。
+- v0.1.0 已完成首版体验功能收口：普通 Release 继续提供全量觉醒、漫游、局部并行相遇、完整交锋和背景反应；舞台内品牌角色 B仔在首场完整相遇释放 reservation 后等待约 `1.2–2.0` 秒出场，无相遇时在约 `20–30` 秒兜底出场。其 hover/menu/layout/外链枚举均与普通演员生态隔离，诊断环境变量仍只供开发期使用。
 - 漫游转向已从瞬时 `facing` 翻转改为独立 `TurnMotionState`：当前朝向和目标朝向分离，反向目标先退出步态，再原地完成 `0.40` 秒连续 Y 轴转身，最后提交新朝向并恢复行走。角色根节点、肩部中心和胯部中心组成固定身体中轴；图标中心位于移动方向后方，并按“肢体半径 + 可见净空”与轴分离后绕轴走圆弧。图标薄片、肩胯和四肢共享局部 3D yaw，挂点不再单帧换边，前后层按投影平均深度交换；转身不属于攻击动作，也不发出 Contact。
 - 白色手脚使用两段式骨架：手臂为肩膀、肘、手；腿为胯、膝、脚。
 - 肩膀和胯部位于图标薄片之外的局部 3D 空间，不直接贴在图标平面内。
@@ -235,12 +236,13 @@ Debug 构建可直接使用这些开关。Release 构建必须先设置 `BESKTOP
 - `BESKTOP_ACTION_PREVIEW` 支持第一轮全部 16 个公开动作 ID，用于首演员原地循环预览。
 - `BESKTOP_COMBAT_PREVIEW` 支持四个固定双演员场景，推荐配合 `BESKTOP_MAX_ACTORS=2`；普通 Release 未打开诊断总开关时会忽略该变量。固定预览优先级为 Combat、Turn、Action；没有固定预览时进入默认产品 Director。
 - `BESKTOP_COMBAT_DIRECTOR_PREVIEW=1` 显式启用生态相遇诊断观测；普通 Release 的低频互动本身默认开启。固定 Combat、Turn 和 Action 预览会暂停产品路径。
+- `BESKTOP_STAGE_GUIDE_PREVIEW=1` 让 B仔立即出现在安全区域并开放完整 mock 菜单；Release 仍须先开启 diagnostics，总开关未开时会忽略该变量，mock 确认不会启动浏览器。
 - 个体感知和双向意图负责提出请求，`EncounterArbiter` 只负责演员占用与空间安全，`ActiveEncounterPool` 负责全部接受请求的独立节奏、更新与释放。演员不足、意图不兼容、空间不足或没有请求时保持纯漫游，不弹出错误。
 - `BESKTOP_TURN_PREVIEW=1` 用于首演员原地循环左右转身；Debug 可直接使用，Release 只有在 `BESKTOP_ENABLE_DIAGNOSTICS=1` 时才会读取。
 
 新增动作或视觉效果前后必须按 [RENDER_PERFORMANCE.md](RENDER_PERFORMANCE.md) 复测全量演员和小规模对照组，记录稳定帧、动作高峰帧、分阶段耗时和资源稳定性。
 
-基于产品代码基线 `33a81a1` 的当前发布候选已完成 x64 Debug、x64 Release 和 Win32 Release 的 clean-first 全量构建，三组 CTest 均发现并通过 10 项注册测试；正式双架构单 EXE、两套 Pack CLI、`Esc` / `Ctrl+Shift+B` 短启动和 x64 普通 Release 5 分钟资源稳定性也已自动验证。动画观感、真实桌面安全、不同 Windows/DPI/任务栏/显示器、SmartScreen 与干净机器仍留给人工 RC 验收，详见 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
+以 `005f1f2` 为实施起点的 B仔候选已完成 x64 Debug、x64 Release 和 Win32 Release 的 clean-first 全量构建，三组 CTest 均发现并通过 13 项注册测试；正式双架构单 EXE、两套 Pack CLI、x64 诊断预览 `Esc` 和 Win32 `Ctrl+Shift+B` 短启动也已自动验证。之前基线的 x64 普通 Release 5 分钟资源检查没有在本次功能回归中重跑；动画观感、真实桌面安全、不同 Windows/DPI/任务栏/显示器、SmartScreen、真实外链与干净机器仍留给人工 RC 验收，详见 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)。
 
 ## 第一版默认取舍
 

@@ -379,7 +379,7 @@ Curious 更常观察，Timid 对重击更容易避让，Calm 多数无视或短�
 
 首版体验参数不进入通用配置框架，而是按职责保留在五个只读 tuning 中：`AwakeningDirectorTuning` 维护 `20% / 35% / 其余` 批次和 `2–9 / 12–26 / 30–52` 秒启动窗口、`4–7` 秒邻近传播等待；`ActorEcosystemTuning` 维护 `6.25` 倍边长感知、`0.35–0.8` 秒意图窗口和 `28` 秒最近对象记忆；`CombatEpisodeTuning` 维护交换数、重整与最终收势；`CombatDirectorTuning` 维护 `14` 秒个人冷却和 P 重开 `5` 秒纯漫游；`ActorEventReactionTuning` 维护事件显著度、观察距离、局部密度抑制和恢复冷却。
 
-本阶段不再新增大型导演、动作或生态架构，也不修改冻结的 ActionClip、Contact、步态 IK 和连续 3D 转身。下一阶段按 [STAGE_GUIDE_NPC.md](STAGE_GUIDE_NPC.md) 增加与普通演员完全隔离的舞台引导角色，再重新执行正式发布候选验收；诊断预览继续只供开发使用，普通 Release 保持低噪声日志。
+本阶段不再新增大型导演、动作或生态架构，也不修改冻结的 ActionClip、Contact、步态 IK 和连续 3D 转身。舞台引导角色已经按 [STAGE_GUIDE_NPC.md](STAGE_GUIDE_NPC.md) 作为独立纯逻辑模块接入，只读取相遇 reservation 快照而不进入演员、感知、交锋或事件反应容器；诊断预览继续只供开发使用，普通 Release 保持低噪声日志。后续工作回到正式发布候选验收，不再扩张动作系统。
 
 关键姿态采样和 IK 数学可以先放在 `action_clip.cpp`，但不得依赖 Win32 窗口或桌面采集对象，便于后续增加纯逻辑测试。
 

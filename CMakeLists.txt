@@ -52,7 +52,10 @@ add_library(besktop_animation STATIC
     src/besktop/animation/encounter_arbiter.cpp
     src/besktop/animation/encounter_director.cpp
     src/besktop/animation/gait_ik.cpp
+    src/besktop/animation/stage_guide_layout.cpp
+    src/besktop/animation/stage_guide_npc.cpp
     src/besktop/animation/turn_motion.cpp
+    src/besktop/app/stage_guide_external_action.cpp
 )
 
 target_compile_features(besktop_animation PUBLIC cxx_std_20)
@@ -79,6 +82,7 @@ add_executable(besktop WIN32
     src/besktop/desktop/desktop_snapshot.cpp
     src/besktop/logging/logger.cpp
     src/besktop/render/icon_image_cache.cpp
+    src/besktop/render/stage_guide_renderer.cpp
     src/besktop/render/taskbar_renderer.cpp
     src/besktop/render/wallpaper_renderer.cpp
     src/main.cpp
@@ -88,6 +92,9 @@ add_executable(besktop WIN32
 
 target_compile_definitions(besktop PRIVATE
     $<$<CONFIG:Debug>:BESKTOP_DEVELOPER_BUILD=1>
+)
+target_compile_options(besktop PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
 )
 
 target_link_libraries(besktop PRIVATE Comctl32 Gdi32 Gdiplus Ole32 Shell32 User32)
@@ -149,6 +156,21 @@ add_executable(besktop_actor_event_reaction_tests
 )
 target_link_libraries(besktop_actor_event_reaction_tests PRIVATE besktop_animation)
 
+add_executable(besktop_stage_guide_npc_tests
+    tests/stage_guide_npc_tests.cpp
+)
+target_link_libraries(besktop_stage_guide_npc_tests PRIVATE besktop_animation)
+
+add_executable(besktop_stage_guide_layout_tests
+    tests/stage_guide_layout_tests.cpp
+)
+target_link_libraries(besktop_stage_guide_layout_tests PRIVATE besktop_animation)
+
+add_executable(besktop_stage_guide_external_action_tests
+    tests/stage_guide_external_action_tests.cpp
+)
+target_link_libraries(besktop_stage_guide_external_action_tests PRIVATE besktop_animation)
+
 enable_testing()
 add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 add_test(NAME besktop_combat_tests COMMAND besktop_combat_tests)
@@ -160,6 +182,9 @@ add_test(NAME besktop_encounter_tests COMMAND besktop_encounter_tests)
 add_test(NAME besktop_ecosystem_tests COMMAND besktop_ecosystem_tests)
 add_test(NAME besktop_active_encounter_pool_tests COMMAND besktop_active_encounter_pool_tests)
 add_test(NAME besktop_actor_event_reaction_tests COMMAND besktop_actor_event_reaction_tests)
+add_test(NAME besktop_stage_guide_npc_tests COMMAND besktop_stage_guide_npc_tests)
+add_test(NAME besktop_stage_guide_layout_tests COMMAND besktop_stage_guide_layout_tests)
+add_test(NAME besktop_stage_guide_external_action_tests COMMAND besktop_stage_guide_external_action_tests)
 
 # Some localized MSVC + NMake environments do not produce usable /showIncludes
 # dependency files. Keep project headers as explicit object dependencies so an
@@ -183,7 +208,10 @@ if(MSVC AND CMAKE_GENERATOR STREQUAL "NMake Makefiles")
             besktop_encounter_tests
             besktop_ecosystem_tests
             besktop_active_encounter_pool_tests
-            besktop_actor_event_reaction_tests)
+            besktop_actor_event_reaction_tests
+            besktop_stage_guide_npc_tests
+            besktop_stage_guide_layout_tests
+            besktop_stage_guide_external_action_tests)
         get_target_property(target_sources ${target_name} SOURCES)
         foreach(source_file IN LISTS target_sources)
             if(source_file MATCHES "\\.(cc|cpp|cxx)$")
@@ -231,5 +259,11 @@ if(MSVC)
     set_property(TARGET besktop_active_encounter_pool_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_actor_event_reaction_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_stage_guide_npc_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_stage_guide_layout_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    set_property(TARGET besktop_stage_guide_external_action_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
