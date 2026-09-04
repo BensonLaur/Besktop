@@ -19,11 +19,6 @@ double Distance(
     return std::hypot(first.x - second.x, first.y - second.y);
 }
 
-double Width(const besktop::StageGuideRect& rect)
-{
-    return std::max(0.0, rect.right - rect.left);
-}
-
 double Height(const besktop::StageGuideRect& rect)
 {
     return std::max(0.0, rect.bottom - rect.top);
@@ -132,14 +127,13 @@ bool TryChooseRoamingTarget(
     const auto& tuning = besktop::GetStageGuideNpcTuning();
     const double margin = state.bodySize * tuning.reservationMarginScale;
     const double horizontalRange = workArea.right - workArea.left - margin * 2.0;
-    const double verticalRange = workArea.bottom - workArea.top - margin * 2.0;
-    if (horizontalRange <= 1.0 || verticalRange <= 1.0) return false;
+    if (horizontalRange <= 1.0) return false;
 
     const bool currentlyInside = CurrentPositionInsideReservation(state, reservations, margin);
     for (int attempt = 0; attempt < 18; ++attempt) {
         const besktop::StageGuidePoint candidate{
             workArea.left + margin + horizontalRange * NextUnit(state),
-            workArea.top + margin + verticalRange * NextUnit(state),
+            state.position.y,
         };
         if (!besktop::StageGuidePointIsSafe(candidate, workArea, reservations, margin)) continue;
         const bool pathSafe = besktop::StageGuidePathIsSafe(
@@ -170,10 +164,6 @@ bool TryPrepareEntry(
     const double inset = state.bodySize * 1.15;
     const double centerX = (workArea.left + workArea.right) * 0.5;
     const double centerY = (workArea.top + workArea.bottom) * 0.5;
-    const double laneX = std::clamp(
-        workArea.left + Width(workArea) * (0.22 + NextUnit(state) * 0.56),
-        workArea.left + margin,
-        workArea.right - margin);
     const double laneY = std::clamp(
         workArea.top + Height(workArea) * (0.20 + NextUnit(state) * 0.58),
         workArea.top + margin,
@@ -183,11 +173,9 @@ bool TryPrepareEntry(
         besktop::StageGuidePoint target;
         double score = 0.0;
     };
-    std::array<Candidate, 4> candidates{{
+    std::array<Candidate, 2> candidates{{
         {{workArea.left - state.bodySize, laneY}, {workArea.left + inset, laneY}, 0.0},
         {{workArea.right + state.bodySize, laneY}, {workArea.right - inset, laneY}, 0.0},
-        {{laneX, workArea.top - state.bodySize}, {laneX, workArea.top + inset}, 0.0},
-        {{laneX, workArea.bottom + state.bodySize}, {laneX, workArea.bottom - inset}, 0.0},
     }};
     for (Candidate& candidate : candidates) {
         candidate.target = ClampPoint(candidate.target, workArea, margin);
@@ -216,22 +204,20 @@ bool TryPrepareEntry(
     return false;
 }
 
-void AdvanceTowards(
+void AdvanceHorizontallyTowards(
     besktop::StageGuideNpcState& state,
     double speed,
     double deltaSeconds)
 {
     const double dx = state.target.x - state.position.x;
-    const double dy = state.target.y - state.position.y;
-    const double distance = std::hypot(dx, dy);
+    const double distance = std::abs(dx);
     if (distance <= 1.0) {
-        state.position = state.target;
+        state.position.x = state.target.x;
         state.moving = false;
         return;
     }
     const double amount = std::min(distance, std::max(0.0, speed * deltaSeconds));
-    state.position.x += dx / distance * amount;
-    state.position.y += dy / distance * amount;
+    state.position.x += (dx < 0.0 ? -amount : amount);
     state.motionPhase += amount / std::max(1.0, state.bodySize * 1.35);
     state.moving = amount > 0.0 && amount + 1e-6 < distance;
 }
@@ -370,10 +356,14 @@ StageGuideNpcStep UpdateStageGuideNpc(
         state.position, state.target, input.reservations, reservationMargin) &&
         !(reservationAtBody && TargetMovesOutwardFromContainingReservations(
             state.position, state.target, input.reservations, reservationMargin));
-    if ((reservationAtBody || unsafeCurrentPath) &&
+    // Once the pointer has engaged the guide, keep that short interaction stable.
+    // A newly active encounter may otherwise reset NoticingPointer every frame,
+    // preventing the dwell threshold from ever completing.  Reservation avoidance
+    // resumes as soon as the menu/panel interaction returns to Roaming.
+    const bool pointerInteractionActive = StageGuideNpcIsFrozen(state);
+    if (!pointerInteractionActive && (reservationAtBody || unsafeCurrentPath) &&
         state.phase != StageGuideNpcPhase::Entering &&
         state.phase != StageGuideNpcPhase::LeavingForExternalAction) {
-        if (StageGuideNpcIsFrozen(state)) ReturnToRoaming(state, step);
         state.targetValid = false;
         TryChooseRoamingTarget(state, input.workArea, input.reservations, step);
     }
@@ -387,7 +377,8 @@ StageGuideNpcStep UpdateStageGuideNpc(
             step.waitingForSafePath = true;
             break;
         }
-        AdvanceTowards(state, GetStageGuideNpcTuning().enteringSpeed, motionDeltaSeconds);
+        AdvanceHorizontallyTowards(
+            state, GetStageGuideNpcTuning().enteringSpeed, motionDeltaSeconds);
         if (!state.moving) {
             state.targetValid = false;
             state.roamingWaitRemaining = NextRange(
@@ -416,7 +407,8 @@ StageGuideNpcStep UpdateStageGuideNpc(
             state.moving = false;
             break;
         }
-        AdvanceTowards(state, GetStageGuideNpcTuning().roamingSpeed, motionDeltaSeconds);
+        AdvanceHorizontallyTowards(
+            state, GetStageGuideNpcTuning().roamingSpeed, motionDeltaSeconds);
         if (!state.moving) {
             state.targetValid = false;
             state.roamingWaitRemaining = NextRange(

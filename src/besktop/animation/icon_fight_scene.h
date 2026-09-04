@@ -37,6 +37,7 @@ public:
         double limbsMs = 0.0;
         double iconBodyMs = 0.0;
         double labelMs = 0.0;
+        double stageGuideMs = 0.0;
     };
 
     struct StageGuideConfig {

@@ -83,6 +83,12 @@ int main()
     besktop::UpdateStageGuideNpc(first, Input(0.02));
     passed &= Expect(first.phase == besktop::StageGuideNpcPhase::Entering,
         "fallback entry did not start after its stable deadline");
+    passed &= Expect(std::abs(first.position.y - first.target.y) <= 1e-9,
+        "crab guide entry was not horizontal");
+    const double entryLaneY = first.position.y;
+    besktop::UpdateStageGuideNpc(first, Input(0.10));
+    passed &= Expect(std::abs(first.position.y - entryLaneY) <= 1e-9,
+        "crab guide changed vertical lanes while entering");
 
     besktop::StageGuideNpcState encounter;
     besktop::InitializeStageGuideNpc(encounter, {6789u, 48.0, false, {}});
@@ -131,6 +137,40 @@ int main()
     besktop::UpdateStageGuideNpc(hover, Input(0.02));
     passed &= Expect(hover.phase == besktop::StageGuideNpcPhase::Roaming,
         "menu did not close after leave grace");
+
+    besktop::StageGuideNpcState clawHover;
+    besktop::InitializeStageGuideNpc(clawHover, {78u, 48.0, true, {true, true, true}});
+    besktop::UpdateStageGuideNpc(clawHover, Input(0.0));
+    const auto clawLayout = Layout(clawHover);
+    const besktop::StageGuidePoint clawPoint{
+        clawHover.position.x + clawHover.bodySize * 0.92,
+        clawHover.position.y,
+    };
+    auto clawPointer = Pointer(clawLayout, clawPoint);
+    besktop::UpdateStageGuideNpc(clawHover, Input(0.01, clawPointer));
+    besktop::UpdateStageGuideNpc(clawHover, Input(0.24, clawPointer));
+    passed &= Expect(clawHover.phase == besktop::StageGuideNpcPhase::PresentingMenu,
+        "hovering a visible outer claw did not present the menu");
+
+    besktop::StageGuideNpcState reservationHover;
+    besktop::InitializeStageGuideNpc(
+        reservationHover, {79u, 48.0, true, {true, true, true}});
+    besktop::UpdateStageGuideNpc(reservationHover, Input(0.0));
+    const auto reservationHoverLayout = Layout(reservationHover);
+    const auto reservationPointer = Pointer(
+        reservationHoverLayout, reservationHover.position);
+    const std::vector<besktop::StageGuideReservation> overlappingReservation{{
+        {reservationHover.position, 90.0},
+    }};
+    besktop::UpdateStageGuideNpc(
+        reservationHover, Input(0.01, reservationPointer, overlappingReservation));
+    for (int frame = 0; frame < 8; ++frame) {
+        besktop::UpdateStageGuideNpc(
+            reservationHover, Input(0.04, reservationPointer, overlappingReservation));
+    }
+    passed &= Expect(
+        reservationHover.phase == besktop::StageGuideNpcPhase::PresentingMenu,
+        "an overlapping encounter repeatedly reset the pointer dwell");
 
     besktop::StageGuideNpcState actions;
     besktop::InitializeStageGuideNpc(actions, {91u, 48.0, true, {true, true, true}});
@@ -232,6 +272,9 @@ int main()
         avoidance.position.y - before.y);
     passed &= Expect(movement <= besktop::GetStageGuideNpcTuning().roamingSpeed * 0.016 + 0.01,
         "reservation avoidance teleported the guide");
+    passed &= Expect(std::abs(avoidance.position.y - before.y) <= 1e-9 &&
+            (!avoidance.targetValid || std::abs(avoidance.target.y - before.y) <= 1e-9),
+        "crab guide changed vertical lanes while roaming");
     passed &= Expect(avoidanceStep.targetChanged || avoidanceStep.waitingForSafePath,
         "unsafe reservation path did not replan or wait");
     if (avoidance.targetValid) {

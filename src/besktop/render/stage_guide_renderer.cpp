@@ -97,9 +97,11 @@ void DrawCharacter(
     const besktop::StageGuideLayout& layout)
 {
     if (!besktop::StageGuideNpcIsVisible(state)) return;
+    (void)layout;
     const double size = state.bodySize;
     const double gait = state.moving ? std::sin(state.motionPhase * 2.0 * kPi) : 0.0;
-    const double bob = state.moving ? -std::abs(std::sin(state.motionPhase * 2.0 * kPi)) * size * 0.025 : 0.0;
+    const double bob = state.moving ?
+        -std::abs(std::sin(state.motionPhase * 2.0 * kPi)) * size * 0.012 : 0.0;
     const double attention = state.phase == besktop::StageGuideNpcPhase::NoticingPointer ||
         besktop::StageGuideNpcShowsMenu(state) ? 1.0 : 0.0;
     const double leaveProgress = state.phase == besktop::StageGuideNpcPhase::LeavingForExternalAction ?
@@ -116,64 +118,78 @@ void DrawCharacter(
     Gdiplus::Pen limb(Gdiplus::Color(characterAlpha, 250, 253, 255), limbWidth);
     limb.SetStartCap(Gdiplus::LineCapRound);
     limb.SetEndCap(Gdiplus::LineCapRound);
+    const float legWidth = ToFloat(std::clamp(size * 0.075, 4.0, 7.0));
+    Gdiplus::Pen legShadow(
+        Gdiplus::Color(Alpha(characterAlpha * 0.18), 0, 0, 0), legWidth + 2.0f);
+    legShadow.SetStartCap(Gdiplus::LineCapRound);
+    legShadow.SetEndCap(Gdiplus::LineCapRound);
+    Gdiplus::Pen leg(Gdiplus::Color(characterAlpha, 238, 249, 255), legWidth);
+    leg.SetStartCap(Gdiplus::LineCapRound);
+    leg.SetEndCap(Gdiplus::LineCapRound);
 
     const double centerX = state.position.x;
     const double centerY = state.position.y + bob + leaveProgress * size * 0.08;
-    const double shoulderY = centerY + size * 0.04;
-    const double hipY = centerY + size * 0.44;
-    const double armSwing = gait * size * 0.13;
-    const double wave = attention * (0.45 + 0.18 * std::sin(state.startupElapsedSeconds * 7.0));
-
-    const Gdiplus::PointF leftShoulder(ToFloat(centerX - size * 0.40), ToFloat(shoulderY));
-    const Gdiplus::PointF leftElbow(
-        ToFloat(centerX - size * (0.60 + wave * 0.10)),
-        ToFloat(shoulderY + size * (0.28 + armSwing / size)));
-    const Gdiplus::PointF leftHand(
-        ToFloat(centerX - size * (0.72 + wave * 0.08)),
-        ToFloat(shoulderY + size * (0.53 + armSwing / size)));
-    const Gdiplus::PointF rightShoulder(ToFloat(centerX + size * 0.40), ToFloat(shoulderY));
-    const Gdiplus::PointF rightElbow(
-        ToFloat(centerX + size * (0.56 + wave * 0.12)),
-        ToFloat(shoulderY + size * (attention > 0.0 ? -0.18 : 0.30 - armSwing / size)));
-    const Gdiplus::PointF rightHand(
-        ToFloat(centerX + size * (attention > 0.0 ? 0.48 : 0.70)),
-        ToFloat(shoulderY + size * (attention > 0.0 ? -0.52 - wave * 0.08 : 0.55 - armSwing / size)));
-
-    const Gdiplus::PointF leftHip(ToFloat(centerX - size * 0.18), ToFloat(hipY));
-    const Gdiplus::PointF leftKnee(
-        ToFloat(centerX - size * 0.22 + gait * size * 0.12),
-        ToFloat(hipY + size * 0.38));
-    const Gdiplus::PointF leftFoot(
-        ToFloat(centerX - size * 0.25 + gait * size * 0.20),
-        ToFloat(hipY + size * 0.78 - std::max(0.0, gait) * size * 0.09));
-    const Gdiplus::PointF rightHip(ToFloat(centerX + size * 0.18), ToFloat(hipY));
-    const Gdiplus::PointF rightKnee(
-        ToFloat(centerX + size * 0.22 - gait * size * 0.12),
-        ToFloat(hipY + size * 0.38));
-    const Gdiplus::PointF rightFoot(
-        ToFloat(centerX + size * 0.25 - gait * size * 0.20),
-        ToFloat(hipY + size * 0.78 - std::max(0.0, -gait) * size * 0.09));
-
     const auto offset = [](const Gdiplus::PointF& point) {
         return Gdiplus::PointF(point.X + 2.2f, point.Y + 2.8f);
     };
-    DrawChain(graphics, shadow, offset(leftShoulder), offset(leftElbow), offset(leftHand));
-    DrawChain(graphics, shadow, offset(leftHip), offset(leftKnee), offset(leftFoot));
-    DrawChain(graphics, shadow, offset(rightHip), offset(rightKnee), offset(rightFoot));
-    DrawChain(graphics, limb, leftShoulder, leftElbow, leftHand);
-    DrawChain(graphics, limb, leftHip, leftKnee, leftFoot);
-    DrawChain(graphics, limb, rightHip, rightKnee, rightFoot);
+    const auto drawChainWithShadow = [&](const Gdiplus::PointF& root,
+                                         const Gdiplus::PointF& joint,
+                                         const Gdiplus::PointF& end) {
+        DrawChain(graphics, shadow, offset(root), offset(joint), offset(end));
+        DrawChain(graphics, limb, root, joint, end);
+    };
 
-    Gdiplus::RectF body = ToRect(layout.bodyRect);
-    body.Y += ToFloat(bob + leaveProgress * size * 0.08);
+    // B仔始终正面朝向观众，以螃蟹横行为唯一移动语言，不复用普通演员的转身。
+    for (int side = -1; side <= 1; side += 2) {
+        for (int legIndex = 0; legIndex < 3; ++legIndex) {
+            const double alternating = ((legIndex + (side > 0 ? 1 : 0)) % 2 == 0) ? gait : -gait;
+            const double rootY = centerY + size * (-0.02 + legIndex * 0.12);
+            const double jointDrop = legIndex == 0 ? -0.01 :
+                (legIndex == 1 ? 0.07 : 0.15);
+            const double footDrop = legIndex == 0 ? 0.08 :
+                (legIndex == 1 ? 0.20 : 0.34);
+            const double jointReach = legIndex == 0 ? 0.63 :
+                (legIndex == 1 ? 0.64 : 0.60);
+            const double footReach = legIndex == 0 ? 0.82 :
+                (legIndex == 1 ? 0.79 : 0.72);
+            const Gdiplus::PointF root(
+                ToFloat(centerX + side * size * 0.43),
+                ToFloat(rootY));
+            const Gdiplus::PointF joint(
+                ToFloat(centerX + side * size * (jointReach + alternating * 0.025)),
+                ToFloat(rootY + size * jointDrop));
+            const Gdiplus::PointF foot(
+                ToFloat(centerX + side * size * (footReach + alternating * 0.050)),
+                ToFloat(rootY + size * (footDrop - std::abs(alternating) * 0.012)));
+            DrawChain(graphics, legShadow, offset(root), offset(joint), offset(foot));
+            DrawChain(graphics, leg, root, joint, foot);
+        }
+    }
+
+    const double eyeRootY = centerY - size * 0.23;
+    const double eyeCenterY = centerY - size * 0.50;
+    for (int side = -1; side <= 1; side += 2) {
+        const Gdiplus::PointF root(
+            ToFloat(centerX + side * size * 0.19), ToFloat(eyeRootY));
+        const Gdiplus::PointF eyeBase(
+            ToFloat(centerX + side * size * 0.19), ToFloat(eyeCenterY));
+        graphics.DrawLine(&shadow, offset(root), offset(eyeBase));
+        graphics.DrawLine(&limb, root, eyeBase);
+    }
+
+    Gdiplus::RectF body(
+        ToFloat(centerX - size * 0.53),
+        ToFloat(centerY - size * 0.27),
+        ToFloat(size * 1.06),
+        ToFloat(size * 0.62));
     Gdiplus::GraphicsPath bodyPath;
-    AddRoundedRectPath(bodyPath, body, ToFloat(size * 0.20));
+    AddRoundedRectPath(bodyPath, body, ToFloat(size * 0.23));
     Gdiplus::SolidBrush bodyShadow(Gdiplus::Color(Alpha(characterAlpha * 0.28), 0, 0, 0));
     Gdiplus::GraphicsPath shadowPath;
     AddRoundedRectPath(
         shadowPath,
         Gdiplus::RectF(body.X + 3.0f, body.Y + 4.0f, body.Width, body.Height),
-        ToFloat(size * 0.20));
+        ToFloat(size * 0.23));
     graphics.FillPath(&bodyShadow, &shadowPath);
     Gdiplus::LinearGradientBrush bodyBrush(
         body,
@@ -187,39 +203,68 @@ void DrawCharacter(
     Gdiplus::FontFamily family(L"Segoe UI");
     Gdiplus::Font logoFont(
         &family,
-        ToFloat(size * 0.67),
+        ToFloat(size * 0.48),
         Gdiplus::FontStyleBold,
         Gdiplus::UnitPixel);
     DrawCenteredText(
         graphics,
         L"B",
-        Gdiplus::RectF(body.X, body.Y - ToFloat(size * 0.035), body.Width, body.Height),
+        Gdiplus::RectF(body.X, body.Y - ToFloat(size * 0.025), body.Width, body.Height),
         logoFont,
         Gdiplus::Color(characterAlpha, 255, 255, 255));
 
-    if (state.pointerPresent && attention > 0.0) {
-        const double dx = std::clamp(
-            (state.pointerPosition.x - state.position.x) / std::max(1.0, size * 2.2),
-            -1.0,
-            1.0);
-        const double dy = std::clamp(
-            (state.pointerPosition.y - state.position.y) / std::max(1.0, size * 2.2),
-            -1.0,
-            1.0);
-        Gdiplus::SolidBrush eye(Gdiplus::Color(Alpha(characterAlpha * 0.82), 6, 60, 122));
-        const float eyeSize = ToFloat(std::max(2.6, size * 0.055));
-        graphics.FillEllipse(&eye,
-            ToFloat(centerX - size * 0.055 + dx * size * 0.025) - eyeSize * 0.5f,
-            ToFloat(centerY - size * 0.15 + dy * size * 0.020) - eyeSize * 0.5f,
-            eyeSize, eyeSize);
-        graphics.FillEllipse(&eye,
-            ToFloat(centerX + size * 0.12 + dx * size * 0.025) - eyeSize * 0.5f,
-            ToFloat(centerY + size * 0.06 + dy * size * 0.020) - eyeSize * 0.5f,
-            eyeSize, eyeSize);
+    const double pointerDx = state.pointerPresent ? std::clamp(
+        (state.pointerPosition.x - state.position.x) / std::max(1.0, size * 2.2),
+        -1.0, 1.0) : 0.0;
+    const double pointerDy = state.pointerPresent ? std::clamp(
+        (state.pointerPosition.y - state.position.y) / std::max(1.0, size * 2.2),
+        -1.0, 1.0) : 0.0;
+    const float eyeDiameter = ToFloat(std::max(10.0, size * 0.18));
+    const float pupilDiameter = ToFloat(std::max(4.0, size * 0.075));
+    Gdiplus::SolidBrush eyeWhite(Gdiplus::Color(characterAlpha, 250, 253, 255));
+    Gdiplus::SolidBrush pupil(Gdiplus::Color(characterAlpha, 7, 48, 103));
+    for (int side = -1; side <= 1; side += 2) {
+        const float eyeX = ToFloat(centerX + side * size * 0.19);
+        const float eyeY = ToFloat(eyeCenterY);
+        graphics.FillEllipse(
+            &eyeWhite,
+            eyeX - eyeDiameter * 0.5f,
+            eyeY - eyeDiameter * 0.5f,
+            eyeDiameter,
+            eyeDiameter);
+        graphics.FillEllipse(
+            &pupil,
+            eyeX + ToFloat(pointerDx * size * 0.035) - pupilDiameter * 0.5f,
+            eyeY + ToFloat(pointerDy * size * 0.030) - pupilDiameter * 0.5f,
+            pupilDiameter,
+            pupilDiameter);
     }
 
-    DrawChain(graphics, shadow, offset(rightShoulder), offset(rightElbow), offset(rightHand));
-    DrawChain(graphics, limb, rightShoulder, rightElbow, rightHand);
+    const double wave = attention * (0.10 + 0.08 * std::sin(state.startupElapsedSeconds * 7.0));
+    for (int side = -1; side <= 1; side += 2) {
+        const double raise = side > 0 ? attention * 0.20 + wave : 0.0;
+        const Gdiplus::PointF root(
+            ToFloat(centerX + side * size * 0.43),
+            ToFloat(centerY - size * 0.08));
+        const Gdiplus::PointF elbow(
+            ToFloat(centerX + side * size * 0.63),
+            ToFloat(centerY - size * (0.16 + raise * 0.55)));
+        const Gdiplus::PointF claw(
+            ToFloat(centerX + side * size * 0.80),
+            ToFloat(centerY - size * (0.20 + raise)));
+        drawChainWithShadow(root, elbow, claw);
+        const Gdiplus::PointF upperTip(
+            ToFloat(claw.X + side * size * 0.13),
+            ToFloat(claw.Y - size * 0.10));
+        const Gdiplus::PointF lowerTip(
+            ToFloat(claw.X + side * size * 0.13),
+            ToFloat(claw.Y + size * 0.10));
+        graphics.DrawLine(&shadow, offset(claw), offset(upperTip));
+        graphics.DrawLine(&shadow, offset(claw), offset(lowerTip));
+        graphics.DrawLine(&limb, claw, upperTip);
+        graphics.DrawLine(&limb, claw, lowerTip);
+    }
+
 }
 
 std::wstring MenuLabel(besktop::StageGuideMenuEntry entry)

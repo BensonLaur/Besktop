@@ -147,6 +147,7 @@ private:
         double limbsMs = 0.0;
         double iconBodyMs = 0.0;
         double labelMs = 0.0;
+        double stageGuideMs = 0.0;
         double finalBltMs = 0.0;
         double totalMs = 0.0;
     };
@@ -195,6 +196,7 @@ private:
     unsigned int timerTickCount_ = 0;
     unsigned int timerDeltaCount_ = 0;
     unsigned int paintFrameCount_ = 0;
+    unsigned int pointerMoveCount_ = 0;
     HDC bufferHdc_ = nullptr;
     HBITMAP bufferBitmap_ = nullptr;
     HGDIOBJ previousBufferBitmap_ = nullptr;
@@ -483,6 +485,7 @@ void StageWindow::Paint()
     timings.limbsMs = sceneTimings.limbsMs;
     timings.iconBodyMs = sceneTimings.iconBodyMs;
     timings.labelMs = sceneTimings.labelMs;
+    timings.stageGuideMs = sceneTimings.stageGuideMs;
     if (traceFirstPaint) {
         LogInfo(L"paint trace: scene rendered");
     }
@@ -759,6 +762,7 @@ void StageWindow::ResetFrameStats(ULONGLONG now)
     timerTickCount_ = 0;
     timerDeltaCount_ = 0;
     paintFrameCount_ = 0;
+    pointerMoveCount_ = 0;
 }
 
 void StageWindow::RecordTimerTick(ULONGLONG now)
@@ -795,6 +799,7 @@ void StageWindow::RecordPaintFrame(const FrameTimings& timings)
     totalStageTimings_.limbsMs += timings.limbsMs;
     totalStageTimings_.iconBodyMs += timings.iconBodyMs;
     totalStageTimings_.labelMs += timings.labelMs;
+    totalStageTimings_.stageGuideMs += timings.stageGuideMs;
     totalStageTimings_.finalBltMs += timings.finalBltMs;
     totalStageTimings_.totalMs += timings.totalMs;
     LogFrameStatsIfDue(GetTickCount64());
@@ -838,7 +843,9 @@ void StageWindow::LogFrameStatsIfDue(ULONGLONG now)
         L"; paint avg/max ms=" +
         FormatDouble(avgPaintMs, 1) +
         L"/" +
-        FormatDouble(maxPaintMs_, 1));
+        FormatDouble(maxPaintMs_, 1) +
+        L"; pointer moves=" +
+        std::to_wstring(pointerMoveCount_));
 
     const double frameDivisor = paintFrameCount_ > 0 ? static_cast<double>(paintFrameCount_) : 1.0;
     LogInfo(
@@ -851,6 +858,7 @@ void StageWindow::LogFrameStatsIfDue(ULONGLONG now)
         L"; limbs=" + FormatDouble(totalStageTimings_.limbsMs / frameDivisor, 2) +
         L"; icon=" + FormatDouble(totalStageTimings_.iconBodyMs / frameDivisor, 2) +
         L"; label=" + FormatDouble(totalStageTimings_.labelMs / frameDivisor, 2) +
+        L"; stage guide=" + FormatDouble(totalStageTimings_.stageGuideMs / frameDivisor, 2) +
         L"; final blt=" + FormatDouble(totalStageTimings_.finalBltMs / frameDivisor, 2) +
         L"; total=" + FormatDouble(totalStageTimings_.totalMs / frameDivisor, 2));
 
@@ -861,6 +869,7 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message) {
     case WM_MOUSEMOVE: {
+        if (options_.frameStatsEnabled) ++pointerMoveCount_;
         if (!trackingMouseLeave_) {
             TRACKMOUSEEVENT tracking{};
             tracking.cbSize = sizeof(tracking);
@@ -872,7 +881,6 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             static_cast<double>(GET_X_LPARAM(lParam)),
             static_cast<double>(GET_Y_LPARAM(lParam)),
             true);
-        InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
     case WM_MOUSELEAVE:

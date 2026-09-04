@@ -68,8 +68,19 @@ int main()
         "menu did not flip below a guide near the top edge");
     passed &= Expect(std::abs(
             (topLayout.bodyHoverRect.right - topLayout.bodyHoverRect.left) /
-                (topLayout.bodyRect.right - topLayout.bodyRect.left) - 1.4) < 1e-9,
-        "body hover region was not 1.4 times the visible body width");
+                (topLayout.bodyRect.right - topLayout.bodyRect.left) - 2.0) < 1e-9 &&
+            std::abs(
+                (topLayout.bodyHoverRect.bottom - topLayout.bodyHoverRect.top) /
+                    (topLayout.bodyRect.bottom - topLayout.bodyRect.top) - 1.4) < 1e-9,
+        "crab hover region did not cover the full wide silhouette");
+    const besktop::StageGuidePoint clawPoint{
+        640.0 + 62.0 * 0.92,
+        60.0,
+    };
+    passed &= Expect(
+        besktop::HitTestStageGuideLayout(topLayout, clawPoint) ==
+            besktop::StageGuideHitTarget::Body,
+        "visible outer claw was not included in the body hover target");
     const besktop::StageGuidePoint corridorCenter{
         (topLayout.interactionCorridor.left + topLayout.interactionCorridor.right) * 0.5,
         (topLayout.interactionCorridor.top + topLayout.interactionCorridor.bottom) * 0.5,

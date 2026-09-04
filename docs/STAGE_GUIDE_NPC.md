@@ -43,7 +43,7 @@ B仔必须像桌面舞台中的角色，而不是悬浮客服按钮、系统组�
 - 只在有效工作区域内移动。
 - 避开任务栏、屏幕边缘和全部活动 reservation。
 - 不进入 `EncounterArbiter`、`ActiveEncounterPool`、`CombatPair`、`CombatEpisode` 或 `ActorEventReaction`。
-- 活动事件靠近时先收起菜单，再选择安全绕行点。
+- 未开始鼠标交互时，活动事件靠近会触发安全绕行；光标已经进入识别、菜单或卡片流程后保持交互稳定，关闭交互后再恢复 reservation 避让。
 - 没有安全点时原地等待，不瞬移、不穿越交锋中心。
 
 ## Hover 菜单

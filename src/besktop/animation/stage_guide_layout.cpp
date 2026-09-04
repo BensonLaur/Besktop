@@ -16,16 +16,6 @@ double Height(const besktop::StageGuideRect& rect)
     return std::max(0.0, rect.bottom - rect.top);
 }
 
-besktop::StageGuideRect Inflate(const besktop::StageGuideRect& rect, double amount)
-{
-    return {
-        rect.left - amount,
-        rect.top - amount,
-        rect.right + amount,
-        rect.bottom + amount,
-    };
-}
-
 besktop::StageGuideRect ClampRectToBounds(
     besktop::StageGuideRect rect,
     const besktop::StageGuideRect& bounds,
@@ -124,7 +114,14 @@ StageGuideLayout ComputeStageGuideLayout(const StageGuideLayoutInput& input)
         input.bodyCenter.x + bodySize * 0.5,
         input.bodyCenter.y + bodySize * 0.5,
     };
-    layout.bodyHoverRect = Inflate(layout.bodyRect, bodySize * 0.20);
+    // The crab silhouette is wider than its branded shell: include claws and
+    // outer walking legs while keeping the original vertical hover tolerance.
+    layout.bodyHoverRect = {
+        layout.bodyRect.left - bodySize * 0.50,
+        layout.bodyRect.top - bodySize * 0.20,
+        layout.bodyRect.right + bodySize * 0.50,
+        layout.bodyRect.bottom + bodySize * 0.20,
+    };
 
     if (layout.showMenu) {
         std::vector<StageGuideMenuEntry> entries;

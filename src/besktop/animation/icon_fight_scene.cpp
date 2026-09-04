@@ -1365,7 +1365,6 @@ void IconFightScene::SetStageGuidePointer(double x, double y, bool insideWindow)
 {
     stageGuidePointer_.insideWindow = insideWindow;
     stageGuidePointer_.position = {x, y};
-    RebuildStageGuideLayout();
     stageGuidePointer_.insideBodyHover = insideWindow &&
         StageGuidePointInRect(stageGuidePointer_.position, stageGuideLayout_.bodyHoverRect);
     stageGuidePointer_.insideInteractionRegion = insideWindow &&
@@ -1436,7 +1435,6 @@ void IconFightScene::UpdateStageGuide(double deltaSeconds)
         });
     }
 
-    RebuildStageGuideLayout();
     stageGuidePointer_.insideBodyHover = stageGuidePointer_.insideWindow &&
         StageGuidePointInRect(stageGuidePointer_.position, stageGuideLayout_.bodyHoverRect);
     stageGuidePointer_.insideInteractionRegion = stageGuidePointer_.insideWindow &&
@@ -1444,7 +1442,7 @@ void IconFightScene::UpdateStageGuide(double deltaSeconds)
     stageGuidePointer_.hitTarget = stageGuidePointer_.insideWindow ?
         HitTestStageGuideLayout(stageGuideLayout_, stageGuidePointer_.position) :
         StageGuideHitTarget::None;
-    UpdateStageGuideNpc(
+    const StageGuideNpcStep stageGuideStep = UpdateStageGuideNpc(
         stageGuideNpc_,
         {
             deltaSeconds,
@@ -1457,6 +1455,17 @@ void IconFightScene::UpdateStageGuide(double deltaSeconds)
             stageGuideReservations_,
             stageGuidePointer_,
         });
+    if (stageGuideNpc_.diagnosticPreview && stageGuideStep.phaseChanged) {
+        LogInfo(
+            L"stage guide phase: " +
+            std::wstring(StageGuideNpcPhaseName(stageGuideNpc_.phase)) +
+            L"; pointer body=" +
+            (stageGuidePointer_.insideBodyHover ? L"yes" : L"no") +
+            L"; pointer region=" +
+            (stageGuidePointer_.insideInteractionRegion ? L"yes" : L"no") +
+            L"; reservations=" +
+            std::to_wstring(stageGuideReservations_.size()));
+    }
     RebuildStageGuideLayout();
 }
 
@@ -2585,7 +2594,12 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
         }
     }
 
+    const LONGLONG stageGuideStart = timings != nullptr ? PerformanceCounterNow() : 0;
     DrawStageGuideNpc(graphics, stageGuideNpc_, stageGuideLayout_);
+    if (timings != nullptr) {
+        timings->stageGuideMs += CounterMilliseconds(
+            stageGuideStart, PerformanceCounterNow());
+    }
 
     Gdiplus::FontFamily fontFamily(L"Microsoft YaHei UI");
     if (!automaticInteractionToast_.empty()) {
