@@ -184,6 +184,8 @@ add_executable(besktop_stage_guide_support_render_tests
     "${BESKTOP_GENERATED_RESOURCE_FILE}")
 target_link_libraries(besktop_stage_guide_support_render_tests PRIVATE
     besktop_animation Gdiplus Ole32 Gdi32 User32)
+target_include_directories(besktop_stage_guide_support_render_tests PRIVATE
+    "${BESKTOP_GENERATED_INCLUDE_DIR}")
 target_compile_definitions(besktop_stage_guide_support_render_tests PRIVATE
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(besktop_stage_guide_support_render_tests PRIVATE
@@ -211,6 +213,8 @@ if(MSVC AND CMAKE_GENERATOR STREQUAL "NMake Makefiles")
     file(GLOB_RECURSE BESKTOP_CORE_HEADERS CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.inl")
+    # The generated version must also invalidate GUI/CLI objects on version bumps.
+    list(APPEND BESKTOP_CORE_HEADERS "${BESKTOP_GENERATED_INCLUDE_DIR}/besktop/version.h")
     foreach(target_name IN ITEMS
             besktop_runtime
             besktop_animation

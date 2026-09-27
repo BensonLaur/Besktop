@@ -6,3 +6,18 @@
 #define BESKTOP_VERSION_MINOR @PROJECT_VERSION_MINOR@
 #define BESKTOP_VERSION_PATCH @PROJECT_VERSION_PATCH@
 #define BESKTOP_VERSION_STRING "@PROJECT_VERSION@"
+
+// Describe the executable target, not the Windows host running it.
+#if defined(_M_X64) || defined(__x86_64__)
+#define BESKTOP_BUILD_ARCH_W L"x64"
+#elif defined(_M_IX86) || defined(__i386__)
+#define BESKTOP_BUILD_ARCH_W L"x86"
+#elif defined(_M_ARM64) || defined(__aarch64__)
+#define BESKTOP_BUILD_ARCH_W L"arm64"
+#else
+#define BESKTOP_BUILD_ARCH_W L"unknown"
+#endif
+
+namespace besktop {
+inline constexpr wchar_t kBuildLabel[] = L"v@PROJECT_VERSION@ \u00B7 " BESKTOP_BUILD_ARCH_W;
+}

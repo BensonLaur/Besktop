@@ -1,5 +1,6 @@
 #include "besktop/render/stage_guide_renderer.h"
 #include "besktop/render/stage_guide_support_images.h"
+#include "besktop/version.h"
 
 #include <windows.h>
 #include <objidl.h>
@@ -470,12 +471,34 @@ void DrawAboutCard(
         Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
     Gdiplus::Font bodyFont(&family, ToFloat(13.0 * layout.dpiScale),
         Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    DrawText(graphics, L"这是 Besktop",
-        Gdiplus::RectF(card.X + ToFloat(20.0 * layout.dpiScale),
-            card.Y + ToFloat(16.0 * layout.dpiScale),
-            card.Width - ToFloat(58.0 * layout.dpiScale),
-            ToFloat(30.0 * layout.dpiScale)),
+    const Gdiplus::RectF titleRect(card.X + ToFloat(20.0 * layout.dpiScale),
+        card.Y + ToFloat(16.0 * layout.dpiScale),
+        card.Width - ToFloat(58.0 * layout.dpiScale), ToFloat(30.0 * layout.dpiScale));
+    DrawText(graphics, L"这是 Besktop", titleRect,
         titleFont, Gdiplus::Color(255, 255, 255, 255));
+
+    Gdiplus::Font versionFont(&family, ToFloat(10.8 * layout.dpiScale),
+        Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Gdiplus::StringFormat versionFormat;
+    versionFormat.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+    versionFormat.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+    Gdiplus::RectF measuredTitle;
+    graphics.MeasureString(L"这是 Besktop", -1, &titleFont, titleRect,
+        &versionFormat, &measuredTitle);
+    const float versionX = titleRect.X + measuredTitle.Width + ToFloat(8.0 * layout.dpiScale);
+    // Align the different font sizes by ascent, while reserving the close button.
+    const float baselineOffset = titleFont.GetSize() * family.GetCellAscent(Gdiplus::FontStyleBold) /
+        family.GetEmHeight(Gdiplus::FontStyleBold) -
+        versionFont.GetSize() * family.GetCellAscent(Gdiplus::FontStyleRegular) /
+        family.GetEmHeight(Gdiplus::FontStyleRegular);
+    const float versionWidth = ToFloat(layout.closeCardRect.left - 8.0 * layout.dpiScale) - versionX;
+    if (versionWidth > 0.0f) {
+        Gdiplus::SolidBrush versionBrush(Gdiplus::Color(255, 184, 211, 234));
+        graphics.DrawString(besktop::kBuildLabel, -1, &versionFont,
+            Gdiplus::RectF(versionX, titleRect.Y + baselineOffset,
+                versionWidth, titleRect.Height - baselineOffset),
+            &versionFormat, &versionBrush);
+    }
     const std::wstring body =
         L"Besktop 会让桌面图标醒来，在桌面上散步和互动。\n\n"
         L"放心，它只在屏幕上演出，不会移动、删除或改写你的真实文件，"

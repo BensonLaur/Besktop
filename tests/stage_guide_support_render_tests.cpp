@@ -1,5 +1,6 @@
 #include "besktop/render/stage_guide_renderer.h"
 #include "besktop/render/stage_guide_support_images.h"
+#include "besktop/version.h"
 
 #include <filesystem>
 #include <algorithm>
@@ -256,6 +257,14 @@ bool PngEncoder(CLSID& id)
 // the user's desktop, opening payment links or starting a full-screen stage.
 int RunTests(int argc, wchar_t** argv)
 {
+    const std::string version = BESKTOP_VERSION_STRING;
+    const std::wstring expectedVersion(version.begin(), version.end());
+    const std::wstring label = besktop::kBuildLabel;
+    Require(label.starts_with(L"v" + expectedVersion + L" \u00B7 "), "label must use configured version");
+#if defined(_M_X64) || defined(_M_IX86)
+    Require(label.ends_with(sizeof(void*) == 8 ? L"x64" : L"x86"),
+        "label must describe executable architecture, not host OS");
+#endif
     besktop::StageGuideSupportImages images;
     if (images.IsReady() || !images.Load(GetModuleHandleW(nullptr)) || !images.IsReady()) return 1;
     if (images.Load(GetModuleHandleW(L"kernel32.dll")) || images.IsReady()) return 2;
