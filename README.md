@@ -9,6 +9,18 @@
 
 Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一个安全的全屏舞台，让空间分散的首批桌面图标先醒来探索，随后通过第二批、邻近加速和兜底波次让全部图标陆续长出白色手脚并自由闲逛。第一轮单演员基础动作库已经完成；普通 Release 会在纯漫游开场后，偶尔让一对自然靠近的演员注意到彼此、接近并短暂判断，再进入攻防、退让或虚张声势，最后带着不同结果余波回到闲逛。
 
+## 下载体验
+
+**v0.1.0 首个公开体验版已于 2026-09-27 发布（Pre-release）。** [查看发布说明与已知限制](https://github.com/BensonLaur/Besktop/releases/tag/v0.1.0)。
+
+- [下载 Besktop.exe（64 位，大多数用户选这个）](https://github.com/BensonLaur/Besktop/releases/download/v0.1.0/Besktop.exe)
+- [下载 Besktop-win32.exe（仅供 32 位 Windows 使用）](https://github.com/BensonLaur/Besktop/releases/download/v0.1.0/Besktop-win32.exe)
+- [SHA256SUMS.txt（文件校验清单，无需运行）](https://github.com/BensonLaur/Besktop/releases/download/v0.1.0/SHA256SUMS.txt)
+
+两个 EXE 是同一软件的架构兼容版本，只需选择一个。下载后双击运行，无需安装、无需另装 VC Runtime；按 `Esc` 退出，`Ctrl+Shift+B` 是备用退出快捷键。GitHub 提供的 Source code 压缩包是源码，不是可直接运行的软件。
+
+本版本尚未进行代码签名，也没有自动更新。请从本项目发布页下载并核对 SHA-256；如遇安全提示，不要为运行程序关闭安全软件或添加排除项。
+
 ## 运行效果
 
 <table>
@@ -32,7 +44,7 @@ Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一
 这个在哪下载？
 ```
 
-既有产品基线：**v0.1.0 RC**。桌面舞台、真实图标采集、图标演员、基础动作和安全退出已经落地，尚未正式发布，兼容性与发布验收清单继续保留。
+当前公开版本：**v0.1.0 体验版**，对应提交 `240ad1d`。桌面舞台、真实图标采集、图标演员、基础动作和安全退出已经落地；当前动作仍较简单，兼容性仍需更多真实环境反馈，不代表已经完成所有 Windows 环境的验证。
 
 下一阶段方向（2026-09-27 已确认）：**三维角色与动作验证**。先建立独立三维火柴人、统一骨架和可持续的动作制作/导入流程，再接回桌面与图标外观。当前仅完成规划，尚未实现拟议的 `AnimationLab`。详见 [三维角色与动作基础计划](docs/ANIMATION_FOUNDATION_PLAN.md)；下文的运行效果与调试命令仍描述既有 Icon Fight，不是新动画能力的完成声明。
 
@@ -40,7 +52,7 @@ Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一
 
 ## 它会发生什么？
 
-计划中的第一版体验：
+v0.1.0 的默认体验：
 
 1. 双击运行 `Besktop.exe`。
 2. 当前桌面看起来一切正常。
@@ -90,21 +102,22 @@ Besktop 不是真病毒。
 
 Icon Fight 的目标不是做复杂游戏，而是做一个“看一眼就想转发”的桌面小惊喜。
 
-计划中的基础效果：
+v0.1.0 已提供的基础效果：
 
-- 图标文字先出现异常。
+- 图标从真实原位分批醒来。
 - 图标长出简洁的白色手脚。
 - 图标本体像一张双面小薄片一样翻转、侧身和摆动，左转右转都能认出原来的图标。
 - 白色手脚像长在图标薄片外侧的小骨架，而不是贴在图标表面的线条。
-- 动作系统先打磨走路、转身、脚落地和手脚反相摆动，再扩展拳击、侧踢、闪避和受击。
+- 动作包含走路、转身、拳击、侧踢、闪避和受击，表现仍有待继续打磨。
 - 角色之间可以靠近、出拳、转身侧踢、闪避、受击和恢复。
-- 被攻击的图标也会加入打架，形成逐步扩散的桌面群架。
+- 多个互不冲突的双图标交锋可以并行发生，附近图标可能观察或避让；当前不包含三人以上围攻或全量群架。
 - 动作轻量、夸张、短循环，适合录屏传播。
 
 ## 当前状态
 
 本仓库目前已经完成：
 
+- v0.1.0 公开体验版发布，提供独立的 x64 / x86 单 EXE。
 - 项目定位、开源边界和商业边界文档。
 - Windows 原生技术路线。
 - 感染演出模式实施计划。
@@ -191,8 +204,9 @@ Debug 或已启用诊断的 Release 会记录详细 Info 日志；普通 Release
 - 第一轮动作系统实施计划：[docs/FIGHT_ACTION_IMPLEMENTATION.md](docs/FIGHT_ACTION_IMPLEMENTATION.md)
 - 仓库定位和发布模型：[docs/REPOSITORY_AND_RELEASE_MODEL.md](docs/REPOSITORY_AND_RELEASE_MODEL.md)
 - Core 单 EXE 发布构建：[docs/RELEASE.md](docs/RELEASE.md)
-- v0.1.0 发布说明候选稿：[docs/RELEASE_NOTES_v0.1.0.md](docs/RELEASE_NOTES_v0.1.0.md)
-- v0.1.0 发布候选验收清单：[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
+- v0.1.0 已发布说明与下载：[GitHub Release](https://github.com/BensonLaur/Besktop/releases/tag/v0.1.0)
+- 历史发布说明候选稿（当前发布信息以上方 Release 为准）：[docs/RELEASE_NOTES_v0.1.0.md](docs/RELEASE_NOTES_v0.1.0.md)
+- 历史发布候选验收清单（不代表当前附件的完整验收结果）：[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - 舞台引导角色实施计划：[docs/STAGE_GUIDE_NPC.md](docs/STAGE_GUIDE_NPC.md)
 - 插件框架 MVP：[docs/MVP_PLUGIN_FRAMEWORK.md](docs/MVP_PLUGIN_FRAMEWORK.md)
 
@@ -212,7 +226,7 @@ Besktop-Plus
 
 ## 当前不做什么
 
-- 不接入真实支付。
+- 不接入支付 API，不创建订单或自动确认打赏；自愿支持仅展示内嵌收款图片。
 - 不实现授权系统。
 - 不发布第二个 Plus 软件。
 - 不做自动开机启动。
