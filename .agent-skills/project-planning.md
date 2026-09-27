@@ -22,6 +22,7 @@ rg --files D:\Projects\Benson\Besktop
 
 - `D:\Projects\Benson\Besktop\README.md`
 - `D:\Projects\Benson\Besktop\docs\TECHNICAL_PLAN.md`
+- `D:\Projects\Benson\Besktop\docs\ANIMATION_FOUNDATION_PLAN.md`：2026-09-27 确认的新动画阶段，优先于旧图标 MVP 的执行顺序。
 - `D:\Projects\Benson\Besktop\docs\OPEN_CORE_BOUNDARY.md`
 - `D:\Projects\Benson\Besktop\docs\ROADMAP.md`
 - `D:\Projects\Benson\Besktop\docs\REPOSITORY_AND_RELEASE_MODEL.md`

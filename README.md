@@ -32,7 +32,9 @@ Besktop 的首个玩法叫 **Icon Fight**：它会把你的桌面临时变成一
 这个在哪下载？
 ```
 
-当前阶段：**v0.1.0 RC**。桌面舞台、真实图标采集、图标演员、基础动作和安全退出已经落地，正在完成首个公开下载候选版本的兼容性与发布验收，尚未正式发布。
+既有产品基线：**v0.1.0 RC**。桌面舞台、真实图标采集、图标演员、基础动作和安全退出已经落地，尚未正式发布，兼容性与发布验收清单继续保留。
+
+下一阶段方向（2026-09-27 已确认）：**三维角色与动作验证**。先建立独立三维火柴人、统一骨架和可持续的动作制作/导入流程，再接回桌面与图标外观。当前仅完成规划，尚未实现拟议的 `AnimationLab`。详见 [三维角色与动作基础计划](docs/ANIMATION_FOUNDATION_PLAN.md)；下文的运行效果与调试命令仍描述既有 Icon Fight，不是新动画能力的完成声明。
 
 首版体验已经收口：默认演出保留分波觉醒、自由漫游、局部相遇、完整交锋与克制的邻近反应，并在核心演出成立后让独立品牌角色“B仔”进入舞台。光标在 B仔附近短暂停留可打开舞台菜单；当前可用的“这是啥？”留在舞台内说明项目与安全边界。反馈和自愿支持入口尚未配置正式 URL，因此普通 Release 会隐藏它们，不使用占位链接。
 
@@ -114,6 +116,8 @@ Icon Fight 的目标不是做复杂游戏，而是做一个“看一眼就想转
 
 ## 技术方向
 
+新动画阶段优先验证 Blender 制作流程、ozz-animation 运行时与独立 D3D11 实验入口；保留既有产品路径，不立即整体替换旧 GDI+ 渲染。候选与阶段验收以 [动画基础计划](docs/ANIMATION_FOUNDATION_PLAN.md) 为准。
+
 初步推荐技术栈：
 
 - C++20
@@ -179,6 +183,7 @@ Debug 或已启用诊断的 Release 会记录详细 Info 日志；普通 Release
 
 关键文档：
 
+- 当前新阶段：[docs/ANIMATION_FOUNDATION_PLAN.md](docs/ANIMATION_FOUNDATION_PLAN.md)
 - 技术方案：[docs/TECHNICAL_PLAN.md](docs/TECHNICAL_PLAN.md)
 - 实施计划：[docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)
 - 渲染性能基线与回归规范：[docs/RENDER_PERFORMANCE.md](docs/RENDER_PERFORMANCE.md)

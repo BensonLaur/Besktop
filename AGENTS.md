@@ -6,6 +6,8 @@
 
 项目处于“文档和计划打磨期”。除非用户明确要求开始实现，否则优先完善中文文档、产品边界、技术方案、路线图和仓库约定，不主动推进功能代码。
 
+2026-09-27 已确认下一阶段优先建设三维角色与动作基础，先验证独立火柴人，再回接图标。先读取 `docs/ANIMATION_FOUNDATION_PLAN.md`；旧桌面 MVP 和 v0.1.0 收口记录保留为历史基线，不作为新阶段前置条件。方向确认不等于自动开始实现。
+
 ## 文档语言
 
 - 项目文档默认使用中文。
@@ -60,6 +62,7 @@ fix(icon): 修复高 DPI 下图标坐标偏移
 | --- | --- | --- |
 | “规划”、“路线图”、“打磨文档” | `.agent-skills/project-planning.md` | 更新产品规划、技术方案和路线图 |
 | “技术方案”、“选型”、“架构” | `.agent-skills/technical-planning.md` | 评估和更新 Windows 原生技术路线 |
+| “三维骨架”、“火柴人”、“动画基础” | `.agent-skills/technical-planning.md` | 维护独立三维角色与动作验证路线 |
 | “开源边界”、“商业边界”、“Plus 边界” | `.agent-skills/open-core-boundary.md` | 维护 Core 与 Plus 的边界 |
 | “仓库定位”、“发布形态”、“单 EXE”、“插件” | `.agent-skills/repository-release-model.md` | 维护仓库协作和单 exe 发布模型 |
 | “提交”、“commit” | `.agent-skills/commit-workflow.md` | 按约定式提交检查和组织提交 |

@@ -4,6 +4,8 @@
 
 用于评估和维护 Besktop Core 的 Windows 原生技术路线。
 
+2026-09-27 起，新动画阶段先做独立三维火柴人、统一骨架与动作流程，再回接图标；先读取 `docs/ANIMATION_FOUNDATION_PLAN.md`，不要沿用旧图标 MVP 的默认顺序。方向确认不等于实现授权。
+
 ## 技术基线
 
 当前推荐方向：
@@ -51,5 +53,6 @@ git -C D:\Projects\Benson\Besktop diff --check
 ## 注意事项
 
 - 不要优先引入 Electron、Unity 或 Unreal，除非用户明确改变“小体积、原生、易传播”的目标。
+- Blender 制作流程、ozz-animation 与独立 D3D11 实验入口是新阶段候选，必须经过样片和导入验证，不能写成已经集成的能力。
 - 不要直接操作真实桌面文件；动画应发生在覆盖层。
 - 不要把支付或授权私钥放入客户端。
