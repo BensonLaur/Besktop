@@ -1418,6 +1418,7 @@ void IconFightScene::RebuildStageGuideLayout()
         StageGuideNpcShowsAbout(stageGuideNpc_),
         StageGuideNpcShowsExternalConfirmation(stageGuideNpc_),
         stageGuideNpc_.confirmingEntry,
+        StageGuideNpcShowsSupport(stageGuideNpc_),
     });
 }
 
@@ -1476,6 +1477,7 @@ void IconFightScene::Reset(
 {
     actors_.clear();
     poseCache_.clear();
+    stageGuideCardCache_.Clear();
     iconImageCache_.Clear();
     monitorBounds_ = snapshot.monitorBounds;
     clientBounds_ = clientRect;
@@ -1553,6 +1555,9 @@ void IconFightScene::Reset(
             stageGuideConfig.diagnosticPreview,
             stageGuideConfig.availability,
         });
+    // The support entry is local and only enabled when both embedded images
+    // decode successfully; it never depends on a payment URL or callback.
+    stageGuideNpc_.availability.support = stageGuideSupportImages_.Load(GetModuleHandleW(nullptr));
     const std::wstring planeSizeSource = hasImageListSize ?
         snapshot.iconDisplay.source :
         std::wstring(L"scene fallback");
@@ -2595,7 +2600,8 @@ void IconFightScene::Render(HDC hdc, const RECT& clientRect, RenderTimings* timi
     }
 
     const LONGLONG stageGuideStart = timings != nullptr ? PerformanceCounterNow() : 0;
-    DrawStageGuideNpc(graphics, stageGuideNpc_, stageGuideLayout_);
+    DrawStageGuideNpc(graphics, stageGuideNpc_, stageGuideLayout_,
+        &stageGuideSupportImages_, &stageGuideCardCache_);
     if (timings != nullptr) {
         timings->stageGuideMs += CounterMilliseconds(
             stageGuideStart, PerformanceCounterNow());

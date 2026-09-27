@@ -19,6 +19,7 @@ struct StageGuideExternalActionHandlers {
     std::function<void()> destroyStageWindow;
     std::function<bool()> stageWindowDestroyed;
     std::function<bool(StageGuideExternalAction)> dispatchApprovedAction;
+    std::function<void()> finishExit;
 };
 
 StageGuideExternalDispatchResult ExecuteStageGuideExternalAction(

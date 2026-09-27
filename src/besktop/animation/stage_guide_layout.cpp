@@ -106,6 +106,7 @@ StageGuideLayout ComputeStageGuideLayout(const StageGuideLayoutInput& input)
     layout.showAbout = input.showAbout;
     layout.showExternalConfirmation = input.showExternalConfirmation;
     layout.confirmingEntry = input.confirmingEntry;
+    layout.showSupport = input.showSupport;
 
     const double bodySize = std::max(24.0, input.bodySize);
     layout.bodyRect = {
@@ -175,25 +176,63 @@ StageGuideLayout ComputeStageGuideLayout(const StageGuideLayoutInput& input)
     }
 
     const double cardMargin = 14.0 * layout.dpiScale;
+    if (layout.showSupport && StageGuideRectIsValid(input.workArea)) {
+        // Scale the entire card together on short screens; independently
+        // clamping its height would let buttons overlap the payment image.
+        const double scale = std::min({layout.dpiScale,
+            Width(input.workArea) / 500.0, Height(input.workArea) / 860.0});
+        layout.supportScale = scale;
+        const double left = (input.workArea.left + input.workArea.right - 470.0 * scale) * 0.5;
+        const double top = (input.workArea.top + input.workArea.bottom - 830.0 * scale) * 0.5;
+        layout.cardRect = {left, top, left + 470.0 * scale, top + 830.0 * scale};
+        layout.closeCardRect = {left + 426.0 * scale, top + 12.0 * scale,
+            left + 458.0 * scale, top + 44.0 * scale};
+        layout.weChatButtonRect = {left + 20.0 * scale, top + 54.0 * scale,
+            left + 230.0 * scale, top + 92.0 * scale};
+        layout.alipayButtonRect = {left + 240.0 * scale, top + 54.0 * scale,
+            left + 450.0 * scale, top + 92.0 * scale};
+        layout.supportImageRect = {left + 20.0 * scale, top + 106.0 * scale,
+            left + 450.0 * scale, top + 700.0 * scale};
+        layout.continueButtonRect = {left + 165.0 * scale, top + 778.0 * scale,
+            left + 305.0 * scale, top + 814.0 * scale};
+        return layout;
+    }
     if (layout.showAbout) {
-        layout.cardRect = BuildCardRect(input, 470.0, 286.0, cardMargin);
+        layout.cardRect = BuildCardRect(input, 390.0, 226.0, cardMargin);
     } else if (layout.showExternalConfirmation) {
-        layout.cardRect = BuildCardRect(input, 410.0, 208.0, cardMargin);
+        layout.cardRect = BuildCardRect(input, 320.0, 152.0, cardMargin);
     }
 
     if (StageGuideRectIsValid(layout.cardRect)) {
         const double scale = layout.dpiScale;
-        const double closeSize = 30.0 * scale;
-        const double inset = 14.0 * scale;
+        const double closeSize = 24.0 * scale;
+        const double inset = 12.0 * scale;
         layout.closeCardRect = {
             layout.cardRect.right - inset - closeSize,
             layout.cardRect.top + inset,
             layout.cardRect.right - inset,
             layout.cardRect.top + inset + closeSize,
         };
-        if (layout.showExternalConfirmation) {
-            const double buttonHeight = 38.0 * scale;
-            const double buttonGap = 10.0 * scale;
+        if (layout.showAbout) {
+            const double buttonWidth = std::min(
+                96.0 * scale,
+                std::max(1.0, Width(layout.cardRect) - inset * 2.0));
+            const double buttonHeight = 34.0 * scale;
+            const double top = std::clamp(
+                layout.cardRect.top + 144.0 * scale,
+                layout.cardRect.top + inset,
+                std::max(
+                    layout.cardRect.top + inset,
+                    layout.cardRect.bottom - inset - buttonHeight));
+            layout.projectButtonRect = {
+                layout.cardRect.right - 20.0 * scale - buttonWidth,
+                top,
+                layout.cardRect.right - 20.0 * scale,
+                top + buttonHeight,
+            };
+        } else if (layout.showExternalConfirmation) {
+            const double buttonHeight = 34.0 * scale;
+            const double buttonGap = 8.0 * scale;
             const double available = Width(layout.cardRect) - inset * 2.0 - buttonGap;
             const double buttonWidth = available * 0.5;
             const double top = layout.cardRect.bottom - inset - buttonHeight;
@@ -218,7 +257,17 @@ StageGuideHitTarget HitTestStageGuideLayout(
     const StageGuideLayout& layout,
     const StageGuidePoint& point)
 {
+    if (layout.showSupport) {
+        if (StageGuidePointInRect(point, layout.weChatButtonRect)) return StageGuideHitTarget::SupportWeChat;
+        if (StageGuidePointInRect(point, layout.alipayButtonRect)) return StageGuideHitTarget::SupportAlipay;
+        if (StageGuidePointInRect(point, layout.closeCardRect)) return StageGuideHitTarget::CloseCard;
+        if (StageGuidePointInRect(point, layout.continueButtonRect)) return StageGuideHitTarget::ContinueWatching;
+        return StageGuideHitTarget::None;
+    }
     if (layout.showAbout) {
+        if (StageGuidePointInRect(point, layout.projectButtonRect)) {
+            return StageGuideHitTarget::ViewProject;
+        }
         if (StageGuidePointInRect(point, layout.closeCardRect)) return StageGuideHitTarget::CloseCard;
         return StageGuideHitTarget::None;
     }
@@ -255,7 +304,7 @@ bool IsStageGuideInteractivePoint(
     const StageGuideLayout& layout,
     const StageGuidePoint& point)
 {
-    if (layout.showAbout || layout.showExternalConfirmation) {
+    if (layout.showAbout || layout.showExternalConfirmation || layout.showSupport) {
         return StageGuidePointInRect(point, layout.cardRect);
     }
     if (StageGuidePointInRect(point, layout.bodyHoverRect)) return true;
@@ -272,9 +321,12 @@ bool IsStageGuideClickableTarget(StageGuideHitTarget target)
     case StageGuideHitTarget::Feedback:
     case StageGuideHitTarget::Support:
     case StageGuideHitTarget::About:
+    case StageGuideHitTarget::ViewProject:
     case StageGuideHitTarget::CloseCard:
     case StageGuideHitTarget::ConfirmExternalAction:
     case StageGuideHitTarget::ContinueWatching:
+    case StageGuideHitTarget::SupportWeChat:
+    case StageGuideHitTarget::SupportAlipay:
         return true;
     default:
         return false;

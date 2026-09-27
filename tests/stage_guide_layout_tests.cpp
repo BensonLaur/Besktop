@@ -55,6 +55,8 @@ int main()
                 "menu escaped the work area at an edge/DPI case");
             passed &= Expect(Inside(workArea, layout.cardRect),
                 "about card escaped the work area at an edge/DPI case");
+            passed &= Expect(Inside(workArea, layout.projectButtonRect),
+                "project button escaped the work area at an edge/DPI case");
             passed &= Expect(layout.menuItems.size() == 3,
                 "diagnostic layout did not expose all three entries");
         }
@@ -97,6 +99,21 @@ int main()
             besktop::StageGuideHitTarget::About,
         "about entry hit test failed");
 
+    const auto aboutCard = besktop::ComputeStageGuideLayout({
+        workArea, {640.0, 650.0}, 62.0, 1.0, 1.0, {true, true, true},
+        true, true, false, besktop::StageGuideMenuEntry::None,
+    });
+    const besktop::StageGuidePoint projectButtonCenter{
+        (aboutCard.projectButtonRect.left + aboutCard.projectButtonRect.right) * 0.5,
+        (aboutCard.projectButtonRect.top + aboutCard.projectButtonRect.bottom) * 0.5,
+    };
+    passed &= Expect(
+        besktop::HitTestStageGuideLayout(aboutCard, projectButtonCenter) ==
+                besktop::StageGuideHitTarget::ViewProject &&
+            besktop::IsStageGuideClickableTarget(
+                besktop::StageGuideHitTarget::ViewProject),
+        "project button hit test failed");
+
     const auto confirmation = besktop::ComputeStageGuideLayout({
         workArea, {1160.0, 650.0}, 62.0, 1.5, 1.0, {true, true, true},
         true, false, true, besktop::StageGuideMenuEntry::Support,
@@ -105,7 +122,41 @@ int main()
             Inside(workArea, confirmation.confirmButtonRect) &&
             Inside(workArea, confirmation.continueButtonRect),
         "confirmation card controls escaped the work area");
+    passed &= Expect(
+        std::abs((confirmation.cardRect.right - confirmation.cardRect.left) - 480.0) < 0.01 &&
+            std::abs((confirmation.cardRect.bottom - confirmation.cardRect.top) - 228.0) < 0.01,
+        "confirmation card did not use the compact DPI-aware size");
 
+    for (const auto area : std::array<besktop::StageGuideRect, 4>{{
+            {0, 0, 1600, 952}, {0, 0, 1280, 720}, {40, 0, 800, 560}, {-1280, 40, 0, 1024}}}) {
+        for (const double scale : {1.0, 1.25, 1.5, 2.0, 2.5}) {
+            besktop::StageGuideLayoutInput input;
+            input.workArea = area;
+            input.bodyCenter = {area.left + 100, area.bottom - 100};
+            input.dpiScale = scale;
+            input.showSupport = true;
+            const auto card = besktop::ComputeStageGuideLayout(input);
+            for (const auto rect : {card.cardRect, card.closeCardRect, card.weChatButtonRect,
+                    card.alipayButtonRect, card.supportImageRect, card.continueButtonRect}) {
+                passed &= Expect(besktop::StageGuideRectIsValid(rect) && Inside(area, rect) &&
+                        Inside(card.cardRect, rect), "support control escaped card/work area");
+            }
+            passed &= Expect(card.weChatButtonRect.right < card.alipayButtonRect.left &&
+                    card.weChatButtonRect.bottom < card.supportImageRect.top &&
+                    card.supportImageRect.bottom < card.continueButtonRect.top,
+                "support controls overlap at a small-screen/DPI case");
+            const auto hitCenter = [&](const besktop::StageGuideRect& rect) {
+                return besktop::HitTestStageGuideLayout(card,
+                    {(rect.left + rect.right) * 0.5, (rect.top + rect.bottom) * 0.5});
+            };
+            passed &= Expect(hitCenter(card.weChatButtonRect) == besktop::StageGuideHitTarget::SupportWeChat &&
+                    hitCenter(card.alipayButtonRect) == besktop::StageGuideHitTarget::SupportAlipay &&
+                    hitCenter(card.closeCardRect) == besktop::StageGuideHitTarget::CloseCard &&
+                    hitCenter(card.continueButtonRect) == besktop::StageGuideHitTarget::ContinueWatching &&
+                    hitCenter(card.supportImageRect) == besktop::StageGuideHitTarget::None,
+                "support card hit test failed");
+        }
+    }
     if (!passed) return 1;
     std::cout << "besktop_stage_guide_layout_tests: all checks passed\n";
     return 0;

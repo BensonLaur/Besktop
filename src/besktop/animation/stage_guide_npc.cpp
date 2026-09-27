@@ -251,6 +251,7 @@ const wchar_t* StageGuideNpcPhaseName(StageGuideNpcPhase phase)
     case StageGuideNpcPhase::NoticingPointer: return L"noticing-pointer";
     case StageGuideNpcPhase::PresentingMenu: return L"presenting-menu";
     case StageGuideNpcPhase::ShowingAbout: return L"showing-about";
+    case StageGuideNpcPhase::ShowingSupport: return L"showing-support";
     case StageGuideNpcPhase::ConfirmingExternalAction: return L"confirming-external-action";
     case StageGuideNpcPhase::LeavingForExternalAction: return L"leaving-for-external-action";
     case StageGuideNpcPhase::Dormant:
@@ -444,6 +445,7 @@ StageGuideNpcStep UpdateStageGuideNpc(
         }
         break;
     case StageGuideNpcPhase::ShowingAbout:
+    case StageGuideNpcPhase::ShowingSupport:
     case StageGuideNpcPhase::ConfirmingExternalAction:
         state.moving = false;
         break;
@@ -452,8 +454,7 @@ StageGuideNpcStep UpdateStageGuideNpc(
         state.leavingElapsedSeconds += deltaSeconds;
         if (!state.externalActionIssued &&
             state.leavingElapsedSeconds >= GetStageGuideNpcTuning().externalActionLeaveSeconds) {
-            state.pendingExternalAction = state.confirmingEntry == StageGuideMenuEntry::Feedback ?
-                StageGuideExternalAction::Feedback : StageGuideExternalAction::Support;
+            state.pendingExternalAction = state.leavingExternalAction;
             state.externalActionIssued = true;
         }
         break;
@@ -479,13 +480,38 @@ bool HandleStageGuideClick(
             return true;
         }
         if (target == StageGuideHitTarget::Support && state.availability.support) {
-            state.confirmingEntry = StageGuideMenuEntry::Support;
-            state.phase = StageGuideNpcPhase::ConfirmingExternalAction;
+            state.supportProvider = StageGuideSupportProvider::WeChat;
+            state.phase = StageGuideNpcPhase::ShowingSupport;
+            return true;
+        }
+        return false;
+    }
+    if (state.phase == StageGuideNpcPhase::ShowingSupport) {
+        if (target == StageGuideHitTarget::SupportWeChat ||
+            target == StageGuideHitTarget::SupportAlipay) {
+            state.supportProvider = target == StageGuideHitTarget::SupportWeChat ?
+                StageGuideSupportProvider::WeChat : StageGuideSupportProvider::Alipay;
+            return true;
+        }
+        // Scanning takes time: neither pointer departure nor a background click
+        // dismisses this card. Only an explicit close (or global exit) does.
+        if (target == StageGuideHitTarget::CloseCard ||
+            target == StageGuideHitTarget::ContinueWatching) {
+            state.phase = StageGuideNpcPhase::PresentingMenu;
+            state.pointerOutsideElapsedSeconds = 0.0;
             return true;
         }
         return false;
     }
     if (state.phase == StageGuideNpcPhase::ShowingAbout) {
+        if (target == StageGuideHitTarget::ViewProject) {
+            state.leavingElapsedSeconds = 0.0;
+            state.externalActionIssued = false;
+            state.pendingExternalAction = StageGuideExternalAction::None;
+            state.leavingExternalAction = StageGuideExternalAction::Project;
+            state.phase = StageGuideNpcPhase::LeavingForExternalAction;
+            return true;
+        }
         if (target == StageGuideHitTarget::CloseCard || target == StageGuideHitTarget::None) {
             state.phase = StageGuideNpcPhase::PresentingMenu;
             state.pointerOutsideElapsedSeconds = 0.0;
@@ -498,6 +524,8 @@ bool HandleStageGuideClick(
             state.leavingElapsedSeconds = 0.0;
             state.externalActionIssued = false;
             state.pendingExternalAction = StageGuideExternalAction::None;
+            state.leavingExternalAction = state.confirmingEntry == StageGuideMenuEntry::Feedback ?
+                StageGuideExternalAction::Feedback : StageGuideExternalAction::Support;
             state.phase = StageGuideNpcPhase::LeavingForExternalAction;
             return true;
         }
@@ -522,6 +550,7 @@ void ClearStageGuidePointerInteraction(
     if (state.phase == StageGuideNpcPhase::NoticingPointer ||
         state.phase == StageGuideNpcPhase::PresentingMenu ||
         state.phase == StageGuideNpcPhase::ShowingAbout ||
+        state.phase == StageGuideNpcPhase::ShowingSupport ||
         state.phase == StageGuideNpcPhase::ConfirmingExternalAction) {
         state.phase = StageGuideNpcPhase::Roaming;
         state.menuProgress = 0.0;
@@ -553,6 +582,11 @@ bool StageGuideNpcShowsAbout(const StageGuideNpcState& state)
     return state.phase == StageGuideNpcPhase::ShowingAbout;
 }
 
+bool StageGuideNpcShowsSupport(const StageGuideNpcState& state)
+{
+    return state.phase == StageGuideNpcPhase::ShowingSupport;
+}
+
 bool StageGuideNpcShowsExternalConfirmation(const StageGuideNpcState& state)
 {
     return state.phase == StageGuideNpcPhase::ConfirmingExternalAction;
@@ -563,6 +597,7 @@ bool StageGuideNpcIsFrozen(const StageGuideNpcState& state)
     return state.phase == StageGuideNpcPhase::NoticingPointer ||
         state.phase == StageGuideNpcPhase::PresentingMenu ||
         state.phase == StageGuideNpcPhase::ShowingAbout ||
+        state.phase == StageGuideNpcPhase::ShowingSupport ||
         state.phase == StageGuideNpcPhase::ConfirmingExternalAction ||
         state.phase == StageGuideNpcPhase::LeavingForExternalAction;
 }

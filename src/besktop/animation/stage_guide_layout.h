@@ -29,9 +29,17 @@ enum class StageGuideHitTarget {
     Feedback,
     Support,
     About,
+    ViewProject,
     CloseCard,
     ConfirmExternalAction,
     ContinueWatching,
+    SupportWeChat,
+    SupportAlipay,
+};
+
+enum class StageGuideSupportProvider {
+    WeChat,
+    Alipay,
 };
 
 struct StageGuideMenuAvailability {
@@ -56,6 +64,7 @@ struct StageGuideLayoutInput {
     bool showAbout = false;
     bool showExternalConfirmation = false;
     StageGuideMenuEntry confirmingEntry = StageGuideMenuEntry::None;
+    bool showSupport = false;
 };
 
 struct StageGuideLayout {
@@ -67,8 +76,13 @@ struct StageGuideLayout {
     std::vector<StageGuideMenuItemLayout> menuItems;
     StageGuideRect cardRect{};
     StageGuideRect closeCardRect{};
+    StageGuideRect projectButtonRect{};
     StageGuideRect confirmButtonRect{};
     StageGuideRect continueButtonRect{};
+    StageGuideRect weChatButtonRect{};
+    StageGuideRect alipayButtonRect{};
+    StageGuideRect supportImageRect{};
+    double supportScale = 1.0;
     double dpiScale = 1.0;
     double menuProgress = 0.0;
     bool menuBelowBody = false;
@@ -76,6 +90,7 @@ struct StageGuideLayout {
     bool showAbout = false;
     bool showExternalConfirmation = false;
     StageGuideMenuEntry confirmingEntry = StageGuideMenuEntry::None;
+    bool showSupport = false;
 };
 
 bool StageGuideRectIsValid(const StageGuideRect& rect);

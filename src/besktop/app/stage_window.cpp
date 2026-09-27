@@ -25,9 +25,11 @@ constexpr UINT kAnimationFrameMs = 16;
 
 std::wstring_view ApprovedStageGuideUrl(besktop::StageGuideExternalAction action)
 {
-    // Production endpoints are deliberately absent until the user explicitly
-    // approves them. Diagnostic preview uses an in-process mock instead.
+    // Only explicitly approved, source-owned production endpoints belong here.
+    // Diagnostic preview uses an in-process mock instead of opening a browser.
     switch (action) {
+    case besktop::StageGuideExternalAction::Project:
+        return L"https://github.com/BensonLaur/Besktop";
     case besktop::StageGuideExternalAction::Feedback:
     case besktop::StageGuideExternalAction::Support:
     case besktop::StageGuideExternalAction::None:
@@ -336,11 +338,9 @@ bool StageWindow::Create(int showCommand)
     StageGuideMenuAvailability guideAvailability;
     guideAvailability.feedback = IsApprovedHttpsUrl(
         ApprovedStageGuideUrl(StageGuideExternalAction::Feedback));
-    guideAvailability.support = IsApprovedHttpsUrl(
-        ApprovedStageGuideUrl(StageGuideExternalAction::Support));
+    // Scene reset enables support only after decoding both embedded posters.
     if (options_.stageGuidePreviewEnabled) {
         guideAvailability.feedback = true;
-        guideAvailability.support = true;
     }
     scene_.Reset(
         snapshot_,
@@ -394,8 +394,23 @@ bool StageWindow::DispatchApprovedStageGuideAction(StageGuideExternalAction acti
         return false;
     }
     const std::wstring ownedUrl(url);
-    return reinterpret_cast<INT_PTR>(ShellExecuteW(
-        nullptr, L"open", ownedUrl.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+    SHELLEXECUTEINFOW executeInfo{};
+    executeInfo.cbSize = sizeof(executeInfo);
+    executeInfo.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    executeInfo.lpVerb = L"open";
+    executeInfo.lpFile = ownedUrl.c_str();
+    executeInfo.nShow = SW_SHOWNORMAL;
+
+    SetLastError(ERROR_SUCCESS);
+    if (!ShellExecuteExW(&executeInfo)) {
+        LogWarning(L"stage guide shell dispatch failed; error=" +
+            std::to_wstring(GetLastError()) + L"; shell=" +
+            std::to_wstring(reinterpret_cast<INT_PTR>(executeInfo.hInstApp)));
+        return false;
+    }
+    LogInfo(L"stage guide shell dispatch completed: action=" +
+        std::to_wstring(static_cast<int>(action)));
+    return true;
 }
 
 void StageWindow::HandleStageGuideExternalAction(StageGuideExternalAction action)
@@ -413,6 +428,7 @@ void StageWindow::HandleStageGuideExternalAction(StageGuideExternalAction action
             [this](StageGuideExternalAction approvedAction) {
                 return DispatchApprovedStageGuideAction(approvedAction);
             },
+            [] { PostQuitMessage(0); },
         });
     if (result != StageGuideExternalDispatchResult::Completed) {
         LogWarning(L"stage guide external action did not complete: " +
@@ -966,8 +982,12 @@ LRESULT StageWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         StopAnimationTimer();
         UnregisterForceExitHotkey();
         ResetRenderBuffers();
-        LogInfo(L"WM_DESTROY; posting quit message");
-        PostQuitMessage(0);
+        if (externalActionFlowStarted_) {
+            LogInfo(L"WM_DESTROY; deferring quit until external action dispatch completes");
+        } else {
+            LogInfo(L"WM_DESTROY; posting quit message");
+            PostQuitMessage(0);
+        }
         return 0;
     case WM_NCDESTROY: {
         HWND hwnd = hwnd_;

@@ -1,11 +1,14 @@
 #include "besktop/render/stage_guide_renderer.h"
+#include "besktop/render/stage_guide_support_images.h"
 
 #include <windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 #include <string>
 
 namespace {
@@ -271,7 +274,7 @@ std::wstring MenuLabel(besktop::StageGuideMenuEntry entry)
 {
     switch (entry) {
     case besktop::StageGuideMenuEntry::Feedback: return L"反馈";
-    case besktop::StageGuideMenuEntry::Support: return L"支持 B仔";
+    case besktop::StageGuideMenuEntry::Support: return L"支持作者";
     case besktop::StageGuideMenuEntry::About: return L"这是啥？";
     default: return {};
     }
@@ -289,7 +292,6 @@ void DrawMenuIcon(
     Gdiplus::Pen pen(Gdiplus::Color(alpha, 38, 151, 239), 2.0f);
     pen.SetStartCap(Gdiplus::LineCapRound);
     pen.SetEndCap(Gdiplus::LineCapRound);
-    Gdiplus::SolidBrush brush(Gdiplus::Color(alpha, 38, 151, 239));
     if (entry == besktop::StageGuideMenuEntry::Feedback) {
         graphics.DrawRectangle(&pen, cx - size * 0.55f, cy - size * 0.42f, size, size * 0.70f);
         graphics.DrawLine(&pen, cx - size * 0.18f, cy + size * 0.28f,
@@ -304,7 +306,8 @@ void DrawMenuIcon(
             cx + size * 0.45f, cy - size * 0.72f,
             cx + size * 0.85f, cy - size * 0.08f,
             cx, cy + size * 0.48f);
-        graphics.FillPath(&brush, &heart);
+        heart.CloseFigure();
+        graphics.DrawPath(&pen, &heart);
     } else {
         graphics.DrawEllipse(&pen, cx - size * 0.48f, cy - size * 0.48f, size, size);
         Gdiplus::FontFamily family(L"Segoe UI");
@@ -350,12 +353,61 @@ void DrawMenu(
     }
 }
 
+struct CardTail {
+    std::array<Gdiplus::PointF, 3> points{};
+    bool visible = false;
+};
+
+CardTail BuildCardTail(const besktop::StageGuideLayout& layout)
+{
+    const double scale = layout.dpiScale;
+    const double bodyCenterX = (layout.bodyRect.left + layout.bodyRect.right) * 0.5;
+    const double tailInset = std::min(
+        30.0 * scale,
+        std::max(0.0, (layout.cardRect.right - layout.cardRect.left) * 0.5 - 1.0));
+    const double tailCenterX = std::clamp(
+        bodyCenterX,
+        layout.cardRect.left + tailInset,
+        layout.cardRect.right - tailInset);
+    const double tailHalfWidth = 11.0 * scale;
+    CardTail tail;
+    if (layout.cardRect.bottom <= layout.bodyRect.top) {
+        tail.points = {{
+            {ToFloat(tailCenterX - tailHalfWidth), ToFloat(layout.cardRect.bottom - 1.0)},
+            {ToFloat(tailCenterX + tailHalfWidth), ToFloat(layout.cardRect.bottom - 1.0)},
+            {ToFloat(bodyCenterX), ToFloat(layout.bodyRect.top - 2.0 * scale)},
+        }};
+        tail.visible = true;
+    } else if (layout.cardRect.top >= layout.bodyRect.bottom) {
+        tail.points = {{
+            {ToFloat(tailCenterX - tailHalfWidth), ToFloat(layout.cardRect.top + 1.0)},
+            {ToFloat(tailCenterX + tailHalfWidth), ToFloat(layout.cardRect.top + 1.0)},
+            {ToFloat(bodyCenterX), ToFloat(layout.bodyRect.bottom + 2.0 * scale)},
+        }};
+        tail.visible = true;
+    }
+    return tail;
+}
+
 void DrawCardBackground(
     Gdiplus::Graphics& graphics,
-    const besktop::StageGuideRect& cardRect,
-    double scale)
+    const besktop::StageGuideLayout& layout)
 {
-    const Gdiplus::RectF rect = ToRect(cardRect);
+    const Gdiplus::RectF rect = ToRect(layout.cardRect);
+    const double scale = layout.dpiScale;
+    const auto cardTail = BuildCardTail(layout);
+    const auto& tail = cardTail.points;
+    const bool hasTail = cardTail.visible;
+
+    if (hasTail) {
+        auto shadowTail = tail;
+        for (Gdiplus::PointF& point : shadowTail) {
+            point.X += 4.0f;
+            point.Y += 5.0f;
+        }
+        Gdiplus::SolidBrush tailShadow(Gdiplus::Color(76, 0, 0, 0));
+        graphics.FillPolygon(&tailShadow, shadowTail.data(), static_cast<INT>(shadowTail.size()));
+    }
     Gdiplus::GraphicsPath shadowPath;
     AddRoundedRectPath(
         shadowPath,
@@ -367,12 +419,17 @@ void DrawCardBackground(
     AddRoundedRectPath(path, rect, ToFloat(18.0 * scale));
     Gdiplus::LinearGradientBrush background(
         rect,
-        Gdiplus::Color(246, 22, 74, 129),
-        Gdiplus::Color(246, 12, 42, 82),
+        Gdiplus::Color(255, 22, 82, 142),
+        Gdiplus::Color(255, 12, 46, 88),
         Gdiplus::LinearGradientModeVertical);
+    if (hasTail) graphics.FillPolygon(&background, tail.data(), static_cast<INT>(tail.size()));
     graphics.FillPath(&background, &path);
     Gdiplus::Pen border(Gdiplus::Color(190, 126, 211, 255), 1.5f);
     graphics.DrawPath(&border, &path);
+    if (hasTail) {
+        graphics.DrawLine(&border, tail[0], tail[2]);
+        graphics.DrawLine(&border, tail[2], tail[1]);
+    }
 }
 
 void DrawCloseButton(
@@ -392,37 +449,52 @@ void DrawCloseButton(
         ToFloat(rect.left + inset), ToFloat(rect.bottom - inset));
 }
 
+void DrawButton(
+    Gdiplus::Graphics& graphics,
+    const besktop::StageGuideRect& rect,
+    const std::wstring& label,
+    bool primary,
+    double scale,
+    const Gdiplus::Font& font);
+
 void DrawAboutCard(
     Gdiplus::Graphics& graphics,
     const besktop::StageGuideLayout& layout)
 {
     if (!layout.showAbout) return;
-    DrawCardBackground(graphics, layout.cardRect, layout.dpiScale);
+    DrawCardBackground(graphics, layout);
     DrawCloseButton(graphics, layout.closeCardRect, layout.dpiScale);
     const Gdiplus::RectF card = ToRect(layout.cardRect);
     Gdiplus::FontFamily family(L"Microsoft YaHei UI");
-    Gdiplus::Font titleFont(&family, ToFloat(21.0 * layout.dpiScale),
+    Gdiplus::Font titleFont(&family, ToFloat(18.0 * layout.dpiScale),
         Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-    Gdiplus::Font bodyFont(&family, ToFloat(14.0 * layout.dpiScale),
+    Gdiplus::Font bodyFont(&family, ToFloat(13.0 * layout.dpiScale),
         Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
     DrawText(graphics, L"这是 Besktop",
-        Gdiplus::RectF(card.X + ToFloat(24.0 * layout.dpiScale),
-            card.Y + ToFloat(20.0 * layout.dpiScale),
-            card.Width - ToFloat(70.0 * layout.dpiScale),
-            ToFloat(34.0 * layout.dpiScale)),
+        Gdiplus::RectF(card.X + ToFloat(20.0 * layout.dpiScale),
+            card.Y + ToFloat(16.0 * layout.dpiScale),
+            card.Width - ToFloat(58.0 * layout.dpiScale),
+            ToFloat(30.0 * layout.dpiScale)),
         titleFont, Gdiplus::Color(255, 255, 255, 255));
     const std::wstring body =
-        L"桌面娱乐演出，让真实桌面图标在安全舞台中醒来。\n\n"
-        L"• 不移动、删除或改写真实桌面文件\n"
-        L"• 不自启动、不后台驻留、不提权\n"
-        L"• P 切换自动互动，Esc 退出\n\n"
-        L"公开项目：BensonLaur/Besktop";
+        L"Besktop 会让桌面图标醒来，在桌面上散步和互动。\n\n"
+        L"放心，它只在屏幕上演出，不会移动、删除或改写你的真实文件，"
+        L"也不自启动、不后台驻留、不提权。\n\n"
+        L"P 自动互动  ·  Esc 退出\n"
+        L"开源项目  BensonLaur/Besktop";
     DrawText(graphics, body,
-        Gdiplus::RectF(card.X + ToFloat(24.0 * layout.dpiScale),
-            card.Y + ToFloat(66.0 * layout.dpiScale),
-            card.Width - ToFloat(48.0 * layout.dpiScale),
-            card.Height - ToFloat(82.0 * layout.dpiScale)),
+        Gdiplus::RectF(card.X + ToFloat(20.0 * layout.dpiScale),
+            card.Y + ToFloat(54.0 * layout.dpiScale),
+            card.Width - ToFloat(40.0 * layout.dpiScale),
+            card.Height - ToFloat(66.0 * layout.dpiScale)),
         bodyFont, Gdiplus::Color(238, 229, 244, 255));
+    DrawButton(
+        graphics,
+        layout.projectButtonRect,
+        L"查看项目",
+        true,
+        layout.dpiScale,
+        bodyFont);
 }
 
 void DrawButton(
@@ -448,41 +520,204 @@ void DrawConfirmationCard(
     const besktop::StageGuideLayout& layout)
 {
     if (!layout.showExternalConfirmation) return;
-    DrawCardBackground(graphics, layout.cardRect, layout.dpiScale);
+    DrawCardBackground(graphics, layout);
     DrawCloseButton(graphics, layout.closeCardRect, layout.dpiScale);
     const Gdiplus::RectF card = ToRect(layout.cardRect);
     Gdiplus::FontFamily family(L"Microsoft YaHei UI");
-    Gdiplus::Font titleFont(&family, ToFloat(18.0 * layout.dpiScale),
+    Gdiplus::Font titleFont(&family, ToFloat(16.0 * layout.dpiScale),
         Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-    Gdiplus::Font bodyFont(&family, ToFloat(13.0 * layout.dpiScale),
+    Gdiplus::Font bodyFont(&family, ToFloat(12.5 * layout.dpiScale),
         Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    const std::wstring actionName = layout.confirmingEntry == besktop::StageGuideMenuEntry::Feedback ?
-        L"反馈" : L"支持 B仔";
-    DrawText(graphics, actionName,
-        Gdiplus::RectF(card.X + ToFloat(22.0 * layout.dpiScale),
-            card.Y + ToFloat(18.0 * layout.dpiScale), card.Width - 80.0f,
-            ToFloat(30.0 * layout.dpiScale)),
+    const bool feedback = layout.confirmingEntry == besktop::StageGuideMenuEntry::Feedback;
+    const std::wstring title = feedback ? L"有想法？告诉我" : L"喜欢这场演出？";
+    const std::wstring body = feedback ?
+        L"将结束本次演出，并前往反馈页。" :
+        L"将结束本次演出，并去看看如何支持 B仔。";
+    DrawText(graphics, title,
+        Gdiplus::RectF(card.X + ToFloat(18.0 * layout.dpiScale),
+            card.Y + ToFloat(14.0 * layout.dpiScale),
+            card.Width - ToFloat(58.0 * layout.dpiScale),
+            ToFloat(26.0 * layout.dpiScale)),
         titleFont, Gdiplus::Color(255, 255, 255, 255));
-    DrawText(graphics, L"将结束本次演出并打开官方网页。",
-        Gdiplus::RectF(card.X + ToFloat(22.0 * layout.dpiScale),
-            card.Y + ToFloat(66.0 * layout.dpiScale),
-            card.Width - ToFloat(44.0 * layout.dpiScale),
-            ToFloat(46.0 * layout.dpiScale)),
+    DrawText(graphics, body,
+        Gdiplus::RectF(card.X + ToFloat(18.0 * layout.dpiScale),
+            card.Y + ToFloat(50.0 * layout.dpiScale),
+            card.Width - ToFloat(36.0 * layout.dpiScale),
+            ToFloat(38.0 * layout.dpiScale)),
         bodyFont, Gdiplus::Color(235, 226, 243, 255));
-    DrawButton(graphics, layout.continueButtonRect, L"继续观看", false,
+    DrawButton(graphics, layout.continueButtonRect, feedback ? L"先不去" : L"继续看", false,
         layout.dpiScale, bodyFont);
-    DrawButton(graphics, layout.confirmButtonRect, L"打开网页", true,
+    DrawButton(graphics, layout.confirmButtonRect, feedback ? L"去反馈" : L"去看看", true,
         layout.dpiScale, bodyFont);
+}
+
+void DrawSupportCard(
+    Gdiplus::Graphics& graphics,
+    const besktop::StageGuideNpcState& state,
+    const besktop::StageGuideLayout& layout,
+    const besktop::StageGuideSupportImages* images)
+{
+    if (!layout.showSupport) return;
+    const double scale = layout.supportScale;
+    auto cardLayout = layout;
+    cardLayout.dpiScale = scale;
+    DrawCardBackground(graphics, cardLayout);
+    DrawCloseButton(graphics, layout.closeCardRect, scale);
+    const auto card = ToRect(layout.cardRect);
+    Gdiplus::FontFamily family(L"Microsoft YaHei UI");
+    Gdiplus::Font titleFont(&family, ToFloat(20.0 * scale),
+        Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+    Gdiplus::Font bodyFont(&family, ToFloat(13.0 * scale),
+        Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+    Gdiplus::Font buttonFont(&family, ToFloat(15.0 * scale),
+        Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+    DrawText(graphics, L"小螃蟹补给站",
+        {card.X + ToFloat(20 * scale), card.Y + ToFloat(14 * scale),
+            ToFloat(380 * scale), ToFloat(32 * scale)},
+        titleFont, Gdiplus::Color(255, 255, 255));
+    const bool weChat = state.supportProvider == besktop::StageGuideSupportProvider::WeChat;
+    DrawButton(graphics, layout.weChatButtonRect, L"微信", weChat, scale, buttonFont);
+    DrawButton(graphics, layout.alipayButtonRect, L"支付宝", !weChat, scale, buttonFont);
+    if (images == nullptr || !images->Draw(graphics, state.supportProvider, layout.supportImageRect)) {
+        DrawCenteredText(graphics, L"收款图片暂不可用，请继续欣赏演出。",
+            ToRect(layout.supportImageRect), bodyFont, Gdiplus::Color(255, 255, 255));
+    }
+    DrawCenteredText(graphics,
+        weChat ? L"用微信扫码，可选择补给档位或自行输入金额" : L"用支付宝扫码，自愿选择支持金额",
+        {card.X + ToFloat(16 * scale), card.Y + ToFloat(708 * scale),
+            card.Width - ToFloat(32 * scale), ToFloat(22 * scale)},
+        bodyFont, Gdiplus::Color(255, 255, 255));
+    DrawCenteredText(graphics, L"自愿支持开发与维护，不购买实物、不解锁功能。\n不打赏，也能完整使用当前免费功能。",
+        {card.X + ToFloat(16 * scale), card.Y + ToFloat(734 * scale),
+            card.Width - ToFloat(32 * scale), ToFloat(38 * scale)},
+        bodyFont, Gdiplus::Color(230, 233, 244, 255));
+    DrawButton(graphics, layout.continueButtonRect, L"继续观看", false, scale, buttonFont);
 }
 
 } // namespace
 
 namespace besktop {
 
+struct StageGuideCardCache::Impl {
+    struct Key {
+        std::array<std::array<double, 4>, 9> rectangles;
+        double dpiScale;
+        double supportScale;
+        bool about;
+        bool confirmation;
+        bool support;
+        StageGuideMenuEntry confirmingEntry;
+        StageGuideSupportProvider provider;
+        const StageGuideSupportImages* images;
+        std::uint64_t imageRevision;
+        bool operator==(const Key&) const = default;
+    };
+
+    static Key MakeKey(const StageGuideNpcState& state, const StageGuideLayout& layout,
+        const StageGuideSupportImages* images)
+    {
+        const auto rect = [](const StageGuideRect& r) {
+            return std::array<double, 4>{r.left, r.top, r.right, r.bottom};
+        };
+        return {{rect(layout.bodyRect), rect(layout.cardRect), rect(layout.closeCardRect),
+            rect(layout.projectButtonRect), rect(layout.confirmButtonRect),
+            rect(layout.continueButtonRect), rect(layout.weChatButtonRect),
+            rect(layout.alipayButtonRect), rect(layout.supportImageRect)},
+            layout.dpiScale, layout.supportScale, layout.showAbout,
+            layout.showExternalConfirmation, layout.showSupport, layout.confirmingEntry,
+            state.supportProvider, images, images ? images->Revision() : 0};
+    }
+
+    Key key{};
+    Gdiplus::Rect bounds;
+    std::unique_ptr<Gdiplus::Bitmap> bitmap;
+    std::size_t builds = 0;
+};
+
+StageGuideCardCache::StageGuideCardCache() : impl_(std::make_unique<Impl>()) {}
+StageGuideCardCache::~StageGuideCardCache() = default;
+
+void StageGuideCardCache::Clear()
+{
+    impl_->bitmap.reset();
+}
+
+std::size_t StageGuideCardCache::BuildCount() const
+{
+    return impl_->builds;
+}
+
+bool StageGuideCardCache::Draw(Gdiplus::Graphics& graphics, const StageGuideNpcState& state,
+    const StageGuideLayout& layout, const StageGuideSupportImages* images)
+{
+    if (!layout.showAbout && !layout.showExternalConfirmation && !layout.showSupport) return false;
+    const auto key = Impl::MakeKey(state, layout, images);
+    if (!impl_->bitmap || !(impl_->key == key)) {
+        // Never keep the old provider's pixels as a fallback after a rebuild failure.
+        Clear();
+        if (!StageGuideRectIsValid(layout.cardRect)) return false;
+        auto extent = layout.cardRect;
+        auto tailLayout = layout;
+        if (layout.showSupport) tailLayout.dpiScale = layout.supportScale;
+        const auto tail = BuildCardTail(tailLayout);
+        if (tail.visible) {
+            for (const auto& point : tail.points) {
+                extent.left = std::min(extent.left, static_cast<double>(point.X));
+                extent.top = std::min(extent.top, static_cast<double>(point.Y));
+                extent.right = std::max(extent.right, static_cast<double>(point.X));
+                extent.bottom = std::max(extent.bottom, static_cast<double>(point.Y));
+            }
+        }
+        // Include the speech tail, shadow (4,5) and antialiased border. Integer
+        // translation preserves the original subpixel phase of text and QR modules.
+        const double left = std::floor(extent.left) - 2;
+        const double top = std::floor(extent.top) - 2;
+        const double width = std::ceil(extent.right) + 6 - left;
+        const double height = std::ceil(extent.bottom) + 7 - top;
+        for (const double value : {left, top, width, height}) {
+            if (!std::isfinite(value) || value < std::numeric_limits<INT>::min() ||
+                value > std::numeric_limits<INT>::max()) return false;
+        }
+        // Bound the optional cache's memory; oversized cards still use direct drawing.
+        if (width <= 0 || height <= 0 || width * height > 32.0 * 1024 * 1024) return false;
+        const Gdiplus::Rect bounds(static_cast<INT>(left), static_cast<INT>(top),
+            static_cast<INT>(width), static_cast<INT>(height));
+        auto bitmap = std::make_unique<Gdiplus::Bitmap>(bounds.Width, bounds.Height, PixelFormat32bppPARGB);
+        if (bitmap->GetLastStatus() != Gdiplus::Ok) return false;
+        {
+            Gdiplus::Graphics cached(bitmap.get());
+            if (cached.GetLastStatus() != Gdiplus::Ok) return false;
+            cached.Clear(Gdiplus::Color(0, 0, 0, 0));
+            cached.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+            cached.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
+            cached.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+            cached.TranslateTransform(-static_cast<float>(bounds.X), -static_cast<float>(bounds.Y));
+            DrawAboutCard(cached, layout);
+            DrawConfirmationCard(cached, layout);
+            DrawSupportCard(cached, state, layout, images);
+            cached.Flush(Gdiplus::FlushIntentionSync);
+            if (cached.GetLastStatus() != Gdiplus::Ok) return false;
+        }
+        impl_->bounds = bounds;
+        impl_->key = key;
+        impl_->bitmap = std::move(bitmap);
+        ++impl_->builds;
+    }
+    const auto saved = graphics.Save();
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+    const auto status = graphics.DrawImage(impl_->bitmap.get(), impl_->bounds,
+        0, 0, impl_->bounds.Width, impl_->bounds.Height, Gdiplus::UnitPixel);
+    graphics.Restore(saved);
+    return status == Gdiplus::Ok;
+}
+
 void DrawStageGuideNpc(
     Gdiplus::Graphics& graphics,
     const StageGuideNpcState& state,
-    const StageGuideLayout& layout)
+    const StageGuideLayout& layout,
+    const StageGuideSupportImages* supportImages,
+    StageGuideCardCache* cardCache)
 {
     if (!StageGuideNpcIsVisible(state)) return;
     if (graphics.GetLastStatus() != Gdiplus::Ok) return;
@@ -490,9 +725,11 @@ void DrawStageGuideNpc(
     graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAliasGridFit);
     graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
     DrawCharacter(graphics, state, layout);
-    DrawMenu(graphics, layout);
+    if (!layout.showAbout && !layout.showExternalConfirmation && !layout.showSupport) DrawMenu(graphics, layout);
+    if (cardCache != nullptr && cardCache->Draw(graphics, state, layout, supportImages)) return;
     DrawAboutCard(graphics, layout);
     DrawConfirmationCard(graphics, layout);
+    DrawSupportCard(graphics, state, layout, supportImages);
 }
 
 } // namespace besktop

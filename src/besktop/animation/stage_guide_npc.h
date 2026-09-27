@@ -14,6 +14,7 @@ enum class StageGuideNpcPhase {
     NoticingPointer,
     PresentingMenu,
     ShowingAbout,
+    ShowingSupport,
     ConfirmingExternalAction,
     LeavingForExternalAction,
 };
@@ -22,6 +23,7 @@ enum class StageGuideExternalAction {
     None,
     Feedback,
     Support,
+    Project,
 };
 
 struct StageGuideReservation {
@@ -85,7 +87,9 @@ struct StageGuideNpcState {
     StageGuidePoint pointerPosition{};
     StageGuideMenuAvailability availability{};
     StageGuideMenuEntry confirmingEntry = StageGuideMenuEntry::None;
+    StageGuideSupportProvider supportProvider = StageGuideSupportProvider::WeChat;
     StageGuideExternalAction pendingExternalAction = StageGuideExternalAction::None;
+    StageGuideExternalAction leavingExternalAction = StageGuideExternalAction::None;
     std::uint32_t randomState = 0xB17A6E21u;
     double bodySize = 60.0;
     double startupElapsedSeconds = 0.0;
@@ -131,6 +135,7 @@ StageGuideExternalAction ConsumeStageGuideExternalAction(StageGuideNpcState& sta
 bool StageGuideNpcIsVisible(const StageGuideNpcState& state);
 bool StageGuideNpcShowsMenu(const StageGuideNpcState& state);
 bool StageGuideNpcShowsAbout(const StageGuideNpcState& state);
+bool StageGuideNpcShowsSupport(const StageGuideNpcState& state);
 bool StageGuideNpcShowsExternalConfirmation(const StageGuideNpcState& state);
 bool StageGuideNpcIsFrozen(const StageGuideNpcState& state);
 bool StageGuidePointIsSafe(

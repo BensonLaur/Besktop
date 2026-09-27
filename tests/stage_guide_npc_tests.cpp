@@ -36,6 +36,7 @@ besktop::StageGuideLayout Layout(const besktop::StageGuideNpcState& state)
         besktop::StageGuideNpcShowsAbout(state),
         besktop::StageGuideNpcShowsExternalConfirmation(state),
         state.confirmingEntry,
+        besktop::StageGuideNpcShowsSupport(state),
     });
 }
 
@@ -213,27 +214,56 @@ int main()
     };
     passed &= Expect(besktop::HandleStageGuideClick(
             support, besktop::HitTestStageGuideLayout(supportLayout, supportPoint)),
-        "configured support entry did not open confirmation");
+        "configured support entry did not open the local card");
     supportLayout = Layout(support);
-    const besktop::StageGuidePoint supportConfirmPoint{
-        (supportLayout.confirmButtonRect.left + supportLayout.confirmButtonRect.right) * 0.5,
-        (supportLayout.confirmButtonRect.top + supportLayout.confirmButtonRect.bottom) * 0.5,
+    passed &= Expect(supportLayout.showSupport &&
+            support.supportProvider == besktop::StageGuideSupportProvider::WeChat &&
+            besktop::StageGuideNpcIsFrozen(support),
+        "support card did not default to WeChat or freeze the guide");
+    const auto supportPosition = support.position;
+    besktop::UpdateStageGuideNpc(support, Input(30.0));
+    passed &= Expect(besktop::StageGuideNpcShowsSupport(support) &&
+            support.position.x == supportPosition.x && support.position.y == supportPosition.y,
+        "support card moved or timed out during scanning");
+    const besktop::StageGuidePoint alipayPoint{
+        (supportLayout.alipayButtonRect.left + supportLayout.alipayButtonRect.right) * 0.5,
+        (supportLayout.alipayButtonRect.top + supportLayout.alipayButtonRect.bottom) * 0.5,
     };
     passed &= Expect(besktop::HandleStageGuideClick(
-            support, besktop::HitTestStageGuideLayout(supportLayout, supportConfirmPoint)),
-        "support confirmation click was not accepted");
-    besktop::UpdateStageGuideNpc(support, Input(0.30));
+            support, besktop::HitTestStageGuideLayout(supportLayout, alipayPoint)) &&
+            support.supportProvider == besktop::StageGuideSupportProvider::Alipay,
+        "Alipay tab did not switch the local image");
+    passed &= Expect(besktop::HandleStageGuideClick(support, besktop::StageGuideHitTarget::SupportWeChat) &&
+            support.supportProvider == besktop::StageGuideSupportProvider::WeChat,
+        "WeChat tab did not switch back");
+    passed &= Expect(!besktop::HandleStageGuideClick(support, besktop::StageGuideHitTarget::None) &&
+            !besktop::HandleStageGuideClick(support, besktop::StageGuideHitTarget::ViewProject) &&
+            besktop::StageGuideNpcShowsSupport(support),
+        "support card dismissed or navigated from an unrelated click");
+    besktop::ClearStageGuidePointerInteraction(support, false);
+    besktop::UpdateStageGuideNpc(support, Input(30.0, {}, overlappingReservation));
     passed &= Expect(
         besktop::ConsumeStageGuideExternalAction(support) ==
-            besktop::StageGuideExternalAction::Support &&
-        besktop::ConsumeStageGuideExternalAction(support) ==
-            besktop::StageGuideExternalAction::None,
-        "support action was not consumed exactly once");
+            besktop::StageGuideExternalAction::None && besktop::StageGuideNpcShowsSupport(support),
+        "local support unexpectedly requested an external action or closed");
+    auto supportCancel = support;
+    passed &= Expect(besktop::HandleStageGuideClick(support, besktop::StageGuideHitTarget::ContinueWatching) &&
+            support.phase == besktop::StageGuideNpcPhase::PresentingMenu,
+        "continue watching did not close the support card");
+    auto supportClose = supportCancel;
+    passed &= Expect(besktop::HandleStageGuideClick(supportClose, besktop::StageGuideHitTarget::CloseCard) &&
+            supportClose.phase == besktop::StageGuideNpcPhase::PresentingMenu,
+        "close button did not close the support card");
+    besktop::ClearStageGuidePointerInteraction(supportCancel, true);
+    passed &= Expect(supportCancel.phase == besktop::StageGuideNpcPhase::Roaming,
+        "focus loss did not clean up the support interaction");
 
     besktop::StageGuideNpcState about;
     besktop::InitializeStageGuideNpc(about, {93u, 48.0, true, {false, false, true}});
     besktop::UpdateStageGuideNpc(about, Input(0.0));
     OpenMenu(about);
+    passed &= Expect(!besktop::HandleStageGuideClick(about, besktop::StageGuideHitTarget::Support),
+        "unavailable support resources still allowed opening the card");
     const auto aboutOnlyLayout = Layout(about);
     passed &= Expect(aboutOnlyLayout.menuItems.size() == 1,
         "unconfigured external entries were not hidden");
@@ -248,10 +278,29 @@ int main()
             besktop::ConsumeStageGuideExternalAction(about) ==
                 besktop::StageGuideExternalAction::None,
         "about card produced an external action");
+    auto projectAction = about;
     besktop::ClearStageGuidePointerInteraction(about, true);
     passed &= Expect(about.phase == besktop::StageGuideNpcPhase::Roaming &&
             about.menuProgress == 0.0 && !about.pointerPresent,
         "focus/cancel pointer cleanup did not dismiss the guide panels");
+
+    const auto aboutCardLayout = Layout(projectAction);
+    const besktop::StageGuidePoint projectButtonPoint{
+        (aboutCardLayout.projectButtonRect.left + aboutCardLayout.projectButtonRect.right) * 0.5,
+        (aboutCardLayout.projectButtonRect.top + aboutCardLayout.projectButtonRect.bottom) * 0.5,
+    };
+    passed &= Expect(
+        besktop::HandleStageGuideClick(
+            projectAction, besktop::HitTestStageGuideLayout(aboutCardLayout, projectButtonPoint)) &&
+            projectAction.phase == besktop::StageGuideNpcPhase::LeavingForExternalAction,
+        "project button did not start the safe external action flow");
+    besktop::UpdateStageGuideNpc(projectAction, Input(0.30));
+    passed &= Expect(
+        besktop::ConsumeStageGuideExternalAction(projectAction) ==
+                besktop::StageGuideExternalAction::Project &&
+            besktop::ConsumeStageGuideExternalAction(projectAction) ==
+                besktop::StageGuideExternalAction::None,
+        "project action was not consumed exactly once");
 
     besktop::StageGuideNpcState avoidance;
     besktop::InitializeStageGuideNpc(avoidance, {101u, 48.0, true, {}});

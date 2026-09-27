@@ -10,7 +10,8 @@ StageGuideExternalDispatchResult ExecuteStageGuideExternalAction(
         return StageGuideExternalDispatchResult::NoAction;
     }
     if (!handlers.stopAnimation || !handlers.destroyStageWindow ||
-        !handlers.stageWindowDestroyed || !handlers.dispatchApprovedAction) {
+        !handlers.stageWindowDestroyed || !handlers.dispatchApprovedAction ||
+        !handlers.finishExit) {
         return StageGuideExternalDispatchResult::InvalidHandler;
     }
 
@@ -19,7 +20,9 @@ StageGuideExternalDispatchResult ExecuteStageGuideExternalAction(
     if (!handlers.stageWindowDestroyed()) {
         return StageGuideExternalDispatchResult::WindowDestroyFailed;
     }
-    if (!handlers.dispatchApprovedAction(action)) {
+    const bool dispatched = handlers.dispatchApprovedAction(action);
+    handlers.finishExit();
+    if (!dispatched) {
         return StageGuideExternalDispatchResult::DispatchFailed;
     }
     return StageGuideExternalDispatchResult::Completed;

@@ -20,6 +20,8 @@
 #include "besktop/animation/stage_guide_npc.h"
 #include "besktop/animation/turn_motion.h"
 #include "besktop/render/icon_image_cache.h"
+#include "besktop/render/stage_guide_renderer.h"
+#include "besktop/render/stage_guide_support_images.h"
 
 namespace besktop {
 
@@ -185,6 +187,9 @@ private:
     mutable std::vector<ActorPose> poseCache_;
     std::unique_ptr<RenderCache> renderCache_;
     IconImageCache iconImageCache_;
+    StageGuideSupportImages stageGuideSupportImages_;
+    // Reverse destruction order releases cached bitmaps before GDI+ shutdown.
+    mutable StageGuideCardCache stageGuideCardCache_;
     RECT monitorBounds_{};
     RECT clientBounds_{};
     RECT wanderBounds_{};

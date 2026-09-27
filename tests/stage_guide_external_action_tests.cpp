@@ -36,11 +36,63 @@ int main()
                 order.push_back("dispatch");
                 return action == besktop::StageGuideExternalAction::Feedback;
             },
+            [&] { order.push_back("finish"); },
         });
     passed &= Expect(result == besktop::StageGuideExternalDispatchResult::Completed,
         "approved external action did not complete");
-    passed &= Expect(order == std::vector<std::string>({"stop", "destroy", "check", "dispatch"}),
+    passed &= Expect(order == std::vector<std::string>({
+            "stop", "destroy", "check", "dispatch", "finish"}),
         "external action ordering changed");
+
+    order.clear();
+    destroyed = false;
+    const auto projectResult = besktop::ExecuteStageGuideExternalAction(
+        besktop::StageGuideExternalAction::Project,
+        {
+            [&] { order.push_back("stop"); },
+            [&] {
+                order.push_back("destroy");
+                destroyed = true;
+            },
+            [&] {
+                order.push_back("check");
+                return destroyed;
+            },
+            [&](besktop::StageGuideExternalAction action) {
+                order.push_back("dispatch");
+                return action == besktop::StageGuideExternalAction::Project;
+            },
+            [&] { order.push_back("finish"); },
+        });
+    passed &= Expect(projectResult == besktop::StageGuideExternalDispatchResult::Completed &&
+            order == std::vector<std::string>({
+                "stop", "destroy", "check", "dispatch", "finish"}),
+        "project action did not preserve safe external dispatch ordering");
+
+    order.clear();
+    destroyed = false;
+    const auto dispatchFailed = besktop::ExecuteStageGuideExternalAction(
+        besktop::StageGuideExternalAction::Project,
+        {
+            [&] { order.push_back("stop"); },
+            [&] {
+                order.push_back("destroy");
+                destroyed = true;
+            },
+            [&] {
+                order.push_back("check");
+                return destroyed;
+            },
+            [&](besktop::StageGuideExternalAction) {
+                order.push_back("dispatch");
+                return false;
+            },
+            [&] { order.push_back("finish"); },
+        });
+    passed &= Expect(dispatchFailed == besktop::StageGuideExternalDispatchResult::DispatchFailed &&
+            order == std::vector<std::string>({
+                "stop", "destroy", "check", "dispatch", "finish"}),
+        "failed browser dispatch did not finish the already-destroyed stage exit");
 
     order.clear();
     const auto blocked = besktop::ExecuteStageGuideExternalAction(
@@ -56,6 +108,7 @@ int main()
                 order.push_back("dispatch");
                 return true;
             },
+            [&] { order.push_back("finish"); },
         });
     passed &= Expect(blocked == besktop::StageGuideExternalDispatchResult::WindowDestroyFailed,
         "dispatch did not stop when the stage remained alive");
@@ -76,6 +129,7 @@ int main()
                 ++callbackCount;
                 return true;
             },
+            [&] { ++callbackCount; },
         });
     passed &= Expect(noAction == besktop::StageGuideExternalDispatchResult::NoAction &&
             callbackCount == 0,

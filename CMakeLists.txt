@@ -6,6 +6,10 @@ set(BESKTOP_BASIC_PACK_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/packs/icon-fight-basic.bpack")
 set(BESKTOP_APP_ICON_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/app/besktop.ico")
+set(BESKTOP_SUPPORT_WECHAT_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/support/wechat.png")
+set(BESKTOP_SUPPORT_ALIPAY_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/support/alipay.png")
 set(BESKTOP_GENERATED_RESOURCE_DIR
     "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(BESKTOP_GENERATED_RESOURCE_FILE
@@ -83,6 +87,7 @@ add_executable(besktop WIN32
     src/besktop/logging/logger.cpp
     src/besktop/render/icon_image_cache.cpp
     src/besktop/render/stage_guide_renderer.cpp
+    src/besktop/render/stage_guide_support_images.cpp
     src/besktop/render/taskbar_renderer.cpp
     src/besktop/render/wallpaper_renderer.cpp
     src/main.cpp
@@ -172,6 +177,18 @@ add_executable(besktop_stage_guide_external_action_tests
 target_link_libraries(besktop_stage_guide_external_action_tests PRIVATE besktop_animation)
 
 enable_testing()
+add_executable(besktop_stage_guide_support_render_tests
+    tests/stage_guide_support_render_tests.cpp
+    src/besktop/render/stage_guide_renderer.cpp
+    src/besktop/render/stage_guide_support_images.cpp
+    "${BESKTOP_GENERATED_RESOURCE_FILE}")
+target_link_libraries(besktop_stage_guide_support_render_tests PRIVATE
+    besktop_animation Gdiplus Ole32 Gdi32 User32)
+target_compile_definitions(besktop_stage_guide_support_render_tests PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(besktop_stage_guide_support_render_tests PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+add_test(NAME besktop_stage_guide_support_render_tests COMMAND besktop_stage_guide_support_render_tests)
 add_test(NAME besktop_action_tests COMMAND besktop_action_tests)
 add_test(NAME besktop_combat_tests COMMAND besktop_combat_tests)
 add_test(NAME besktop_combat_episode_tests COMMAND besktop_combat_episode_tests)
@@ -211,7 +228,8 @@ if(MSVC AND CMAKE_GENERATOR STREQUAL "NMake Makefiles")
             besktop_actor_event_reaction_tests
             besktop_stage_guide_npc_tests
             besktop_stage_guide_layout_tests
-            besktop_stage_guide_external_action_tests)
+            besktop_stage_guide_external_action_tests
+            besktop_stage_guide_support_render_tests)
         get_target_property(target_sources ${target_name} SOURCES)
         foreach(source_file IN LISTS target_sources)
             if(source_file MATCHES "\\.(cc|cpp|cxx)$")
@@ -236,6 +254,8 @@ foreach(target_name IN ITEMS besktop besktop_mvp_cli)
 endforeach()
 
 if(MSVC)
+    set_property(TARGET besktop_stage_guide_support_render_tests PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_runtime PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_animation PROPERTY
