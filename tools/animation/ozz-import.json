@@ -1,0 +1,9 @@
+{
+  "skeleton": {
+    "filename": "skeleton.ozz",
+    "import": {"enable": true, "types": {"any": true}}
+  },
+  "animations": [
+    {"clip": "*", "filename": "*.ozz", "sampling_rate": 60, "optimize": false}
+  ]
+}

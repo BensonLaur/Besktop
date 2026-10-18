@@ -6,6 +6,10 @@
 #include "besktop/app/stage_window.h"
 #include "besktop/app/runtime_options.h"
 #include "besktop/logging/logger.h"
+#ifdef BESKTOP_ANIMATION_FOUNDATION
+#include "besktop/anim3d/app.h"
+#include <shellapi.h>
+#endif
 
 namespace {
 
@@ -96,6 +100,21 @@ void ConfigureDpiAwareness()
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
+#ifdef BESKTOP_ANIMATION_FOUNDATION
+    // Explicit preview switches preserve the shipped desktop path and its safety behavior.
+    int argumentCount = 0;
+    LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+    bool animationLab = false, animationStage = false;
+    for (int i = 1; i < argumentCount; ++i) {
+        animationLab |= std::wstring(arguments[i]) == L"--animation-lab";
+        animationStage |= std::wstring(arguments[i]) == L"--animation-stage";
+    }
+    LocalFree(arguments);
+    if (animationLab || animationStage) {
+        ConfigureDpiAwareness();
+        return besktop::anim3d::RunAnimationApp(instance, showCommand, animationStage && !animationLab);
+    }
+#endif
     const besktop::RuntimeOptions& options = besktop::GetRuntimeOptions();
     besktop::ConfigureLogging(options.verboseInfoLogging ? besktop::LogLevel::Info : besktop::LogLevel::Warning);
     if (options.invalidActionPreview) {

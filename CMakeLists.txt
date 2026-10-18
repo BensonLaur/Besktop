@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.24)
 
 project(Besktop VERSION 0.1.0 LANGUAGES CXX RC)
 
+option(BESKTOP_BUILD_ANIMATION_LAB "Build the opt-in G1-G5 animation foundation preview" OFF)
+
 set(BESKTOP_BASIC_PACK_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/packs/icon-fight-basic.bpack")
 set(BESKTOP_APP_ICON_PATH
@@ -290,4 +292,8 @@ if(MSVC)
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     set_property(TARGET besktop_stage_guide_external_action_tests PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+if(BESKTOP_BUILD_ANIMATION_LAB)
+    include(cmake/AnimationFoundation.cmake)
 endif()

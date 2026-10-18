@@ -10,6 +10,10 @@ obj/
 *.vcxproj*
 *.sln
 
+# Python asset-tool cache
+__pycache__/
+*.py[cod]
+
 # CMake
 CMakeFiles/
 CMakeCache.txt

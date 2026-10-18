@@ -1,0 +1,9 @@
+{
+  "reference_source": "08_01",
+  "clips": [
+    {"name": "walk", "source": "08_01", "description": "Walk cycle is selected and sealed by the importer"},
+    {"name": "idle", "source": "113_21", "limit_seconds": 4, "description": "Standing still"},
+    {"name": "stop", "source": "16_33", "description": "Slow walking deceleration and settle"},
+    {"name": "turn", "source": "16_19", "description": "90-degree right walking turn, not an in-place pivot"}
+  ]
+}

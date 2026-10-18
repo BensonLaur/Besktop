@@ -1,0 +1,27 @@
+{
+  "id": "besktop.joint-reference.rajagopal2016.v1",
+  "source": {
+    "url": "https://github.com/opensim-org/opensim-models/blob/d9b05d470b1a481c222372c85b75772faf8f7792/Models/Rajagopal/Rajagopal2016.osim",
+    "commit": "d9b05d470b1a481c222372c85b75772faf8f7792",
+    "sha256": "3f5c5f23e486073f2ad2aa4a4967ffe2fcdd582b1e355512bc54f70c36376bf4",
+    "paper": "https://doi.org/10.1109/TBME.2016.2586891"
+  },
+  "units": "meters",
+  "configuration": "all joint coordinates zero; knee transform zero at first spline knot",
+  "endpoint_kind": "OpenSim neutral joint-frame origins, not CT bone lengths or surface landmarks",
+  "segments": {
+    "thigh_r": {"body": "femur_r", "proximal": [0, 0, 0], "distal": [-0.00809, -0.40796, -0.00275]},
+    "shin_r": {"body": "tibia_r", "proximal": [-0.00808954, -0.0035348, -0.00148474], "distal": [-0.01, -0.4, 0]},
+    "thigh_l": {"body": "femur_l", "proximal": [0, 0, 0], "distal": [-0.00809, -0.40796, 0.00275]},
+    "shin_l": {"body": "tibia_l", "proximal": [-0.00808954, -0.0035348, 0.00148474], "distal": [-0.01, -0.4, 0]}
+  },
+  "adaptation": {
+    "target_leg_span_m": 0.87,
+    "policy": "mean left/right segment lengths; uniform scale to existing character hip-to-ankle span",
+    "scope": "leg segment allocation only; other dimensions remain engineering/presentation choices"
+  },
+  "gb_t_10000_2023": {
+    "url": "https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=B19DCCA575D9406856ABF87A511EE11F",
+    "status": "not_applied_pending_full_tables_and_landmark_definitions"
+  }
+}

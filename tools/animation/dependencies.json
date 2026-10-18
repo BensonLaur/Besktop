@@ -1,0 +1,24 @@
+{
+  "blender": {
+    "version": "4.5.3 LTS",
+    "file": "blender-4.5.3-windows-x64.zip",
+    "url": "https://mirror.blender.org/release/Blender4.5/blender-4.5.3-windows-x64.zip",
+    "sha256": "6b657c8bdd3a7b65b07b9e1ae17eb4be7dd4aa23121da7f3d3354fc2551330a7",
+    "checksum_source": "https://mirror.blender.org/release/Blender4.5/blender-4.5.3.sha256",
+    "directory": "blender-4.5.3-windows-x64"
+  },
+  "ozz": {
+    "version": "0.16.0",
+    "commit": "6cbdc790123aa4731d82e255df187b3a8a808256",
+    "file": "ozz-0.16.0.zip",
+    "url": "https://codeload.github.com/guillaumeblanc/ozz-animation/zip/refs/tags/0.16.0",
+    "sha256": "f5312159da1d2ca0acbe62d94521d32eb1cb4435791400e8d9ab317e8a29bfd9",
+    "directory": "ozz-animation-0.16.0"
+  },
+  "motions": [
+    {"file": "08_01.bvh", "description": "walk", "url": "https://codewelt.com/dl/cmuconvert-mb2/08_01.bvh", "sha256": "4e6cc1e0aa8b6b112be25b6aab5db8f176094181280b2c8ebcf903ede66e6e98"},
+    {"file": "113_21.bvh", "description": "standing still", "url": "https://codewelt.com/dl/cmuconvert-mb2/113_21.bvh", "sha256": "127c9364e77f6a8eb4197a4d58959f71758072a4db2f05e0360464aef16ce57a"},
+    {"file": "16_33.bvh", "description": "slow walk, stop", "url": "https://codewelt.com/dl/cmuconvert-mb2/16_33.bvh", "sha256": "e4600cd3ab9bc61ce24d15fd40d07bcd1e8782c0bccc5899a4e8bdc12c97d240"},
+    {"file": "16_19.bvh", "description": "walk, 90-degree right turn", "url": "https://codewelt.com/dl/cmuconvert-mb2/16_19.bvh", "sha256": "bd5f6f56d52d0b5cd13e657f8cebfc15d70f07f063f6fd1b540ca8778efbce80"}
+  ]
+}
